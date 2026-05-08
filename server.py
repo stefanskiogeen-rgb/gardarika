@@ -1,13 +1,22 @@
 import os
+import io
 import json
 import uuid
 import re
 import logging
 from datetime import datetime, timedelta
 from functools import wraps
+
+try:
+    from dotenv import load_dotenv
+    load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), '.env'))
+except ImportError:
+    pass
+
 from werkzeug.security import generate_password_hash, check_password_hash
-from flask import Flask, request, redirect, url_for, session, render_template, jsonify, render_template_string
+from flask import Flask, request, redirect, url_for, session, render_template, jsonify, render_template_string, send_file, abort
 from flask_sqlalchemy import SQLAlchemy
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy import text, func
 
 # Инициализация Flask
@@ -740,6 +749,41 @@ def workouts_list():
     return render_template('workouts-list.html', workouts=workouts, current_date=effective_date, show_all=show_all)
 
 
+def _friendly_db_error(exc):
+    """Извлекает человеко-читаемое сообщение из ошибки PostgreSQL (RAISE EXCEPTION)."""
+    msg = str(getattr(exc, 'orig', exc))
+    for line in msg.splitlines():
+        line = line.strip()
+        if line.startswith('ОШИБКА:') or line.startswith('ERROR:'):
+            return line
+    return msg.splitlines()[0] if msg else 'Не удалось сохранить тренировку.'
+
+
+def _render_workouts_form(item=None, error=None):
+    """Перерисовывает форму /workouts/add|edit с сохранением контекста и текстом ошибки."""
+    p_data = []
+    if item is not None:
+        for p in getattr(item, 'participants', []) or []:
+            p_data.append({
+                'rider_id': p.idrider if p.idrider else 'guest',
+                'guest_name': p.guest_name or '',
+                'horse_id': p.idhorse or ''
+            })
+    now_msk = datetime.utcnow() + timedelta(hours=3)
+    return render_template(
+        'dashboard-add.html',
+        item=item,
+        participants_json=json.dumps(p_data),
+        trainers=Trainer.query.all(),
+        riders=Rider.query.all(),
+        horses=Horse.query.all(),
+        services=Service.query.all(),
+        default_date=now_msk.strftime('%Y-%m-%d'),
+        default_time=now_msk.strftime('%H:%M'),
+        error=error,
+    )
+
+
 @app.route('/workouts/add', methods=['GET', 'POST'])
 @login_required
 def workouts_add():
@@ -772,8 +816,11 @@ def workouts_add():
             db.session.add(p)
             
         # Если статус сразу "Завершено", списание произойдет автоматически через триггер БД
-            
-        db.session.commit()
+        try:
+            db.session.commit()
+        except SQLAlchemyError as e:
+            db.session.rollback()
+            return _render_workouts_form(error=_friendly_db_error(e))
         return redirect(url_for('workouts_list'))
     
     # Defaults in MSK (UTC+3)
@@ -820,8 +867,11 @@ def workouts_edit(item_id):
             p.idhorse = int(p_horses[i]) if i < len(p_horses) and p_horses[i] else None
             db.session.add(p)
             
-        db.session.commit()
-        db.session.commit()
+        try:
+            db.session.commit()
+        except SQLAlchemyError as e:
+            db.session.rollback()
+            return _render_workouts_form(item=w, error=_friendly_db_error(e))
         return redirect(url_for('workouts_list'))
     
     # Подготовка данных для редактирования (JSON для JS)
@@ -853,6 +903,158 @@ def workouts_update_status(item_id):
     db.session.commit()
     return redirect(url_for('workouts_list'))
 
+# ===== ВЫВОД PDF: ЧЕК ОПЛАТЫ УСЛУГ =====
+@app.route('/workouts/<int:item_id>/receipt')
+@login_required
+def workout_receipt(item_id):
+    """Генерирует PDF-чек оплаты услуг по конкретной тренировке.
+
+    На один чек попадают: всадник(и), тренер, лошадь(и), услуга, дата/время и сумма.
+    """
+    w = Workout.query.get_or_404(item_id)
+    pdf_bytes = build_workout_receipt_pdf(w)
+    filename = f"receipt_workout_{item_id}.pdf"
+    return send_file(
+        io.BytesIO(pdf_bytes),
+        mimetype='application/pdf',
+        as_attachment=False,
+        download_name=filename,
+    )
+
+
+def build_workout_receipt_pdf(w):
+    """Собирает PDF-чек по тренировке. Возвращает bytes."""
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.units import mm
+    from reportlab.pdfgen import canvas
+    from reportlab.pdfbase import pdfmetrics
+    from reportlab.pdfbase.ttfonts import TTFont
+
+    # Регистрируем шрифт с поддержкой кириллицы.
+    # Сначала ищем рядом с проектом (static/fonts/DejaVuSans*.ttf — лежат в репо,
+    # работает на любой ОС: Windows / macOS / Linux), потом — системные пути.
+    font_name = 'DejaVu'
+    bold_name = 'DejaVu-Bold'
+    bundled_dir = os.path.join(BASE_DIR, 'static', 'fonts')
+    candidates = [
+        os.path.join(bundled_dir, 'DejaVuSans.ttf'),
+        '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
+        '/usr/share/fonts/dejavu/DejaVuSans.ttf',
+        '/Library/Fonts/DejaVuSans.ttf',
+        '/System/Library/Fonts/Supplemental/Arial Unicode.ttf',
+    ]
+    bold_candidates = [
+        os.path.join(bundled_dir, 'DejaVuSans-Bold.ttf'),
+        '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf',
+        '/usr/share/fonts/dejavu/DejaVuSans-Bold.ttf',
+        '/Library/Fonts/DejaVuSans-Bold.ttf',
+        '/System/Library/Fonts/Supplemental/Arial Unicode.ttf',
+    ]
+    regular_path = next((p for p in candidates if os.path.exists(p)), None)
+    bold_path = next((p for p in bold_candidates if os.path.exists(p)), None)
+    if regular_path and font_name not in pdfmetrics.getRegisteredFontNames():
+        pdfmetrics.registerFont(TTFont(font_name, regular_path))
+    if bold_path and bold_name not in pdfmetrics.getRegisteredFontNames():
+        pdfmetrics.registerFont(TTFont(bold_name, bold_path))
+    use_font = font_name if regular_path else 'Helvetica'
+    use_bold = bold_name if bold_path else (font_name if regular_path else 'Helvetica-Bold')
+
+    # Подготовка данных
+    riders = []
+    horses = []
+    for p in w.participants:
+        if p.idrider and p.rider:
+            riders.append(p.rider.full_name)
+        elif p.guest_name:
+            riders.append(f"{p.guest_name} (гость)")
+        if p.idhorse and p.horse:
+            horses.append(p.horse.name)
+        elif p.idrider or p.guest_name:
+            horses.append('Своя')
+    riders_str = ', '.join(riders) if riders else 'Не назначен'
+    horses_str = ', '.join(horses) if horses else 'Не выбрана'
+    trainer_str = w.trainer_rel.full_name if w.trainer_rel else 'Без тренера'
+    service = w.service_rel
+    service_name = service.name if service else 'Не указана'
+    duration = service.duration if service and service.duration else 0
+    price = service.price if service and service.price else 0
+    total = price * max(1, len(riders) or 1)
+    date_str = w.datetime_start.strftime('%d.%m.%Y') if w.datetime_start else '—'
+    time_str = w.datetime_start.strftime('%H:%M') if w.datetime_start else '—'
+    issued_str = get_msk_now().strftime('%d.%m.%Y %H:%M')
+    receipt_no = f"{w.id:06d}"
+
+    # Рисуем PDF
+    buf = io.BytesIO()
+    c = canvas.Canvas(buf, pagesize=A4)
+    page_w, page_h = A4
+
+    # Заголовок
+    c.setFont(use_bold, 18)
+    c.drawCentredString(page_w / 2, page_h - 25 * mm, 'КОННОСПОРТИВНЫЙ КЛУБ «ГАРДАРИКА»')
+    c.setFont(use_font, 10)
+    c.drawCentredString(page_w / 2, page_h - 32 * mm, 'Чек об оплате услуг')
+
+    # Линия
+    c.setStrokeColorRGB(0.7, 0.7, 0.7)
+    c.line(20 * mm, page_h - 38 * mm, page_w - 20 * mm, page_h - 38 * mm)
+
+    # Шапка
+    c.setFont(use_bold, 12)
+    c.drawString(20 * mm, page_h - 48 * mm, f'Чек № {receipt_no}')
+    c.setFont(use_font, 10)
+    c.drawRightString(page_w - 20 * mm, page_h - 48 * mm, f'Дата формирования: {issued_str}')
+
+    # Содержание
+    y = page_h - 60 * mm
+    line_h = 8 * mm
+
+    def row(label, value):
+        nonlocal y
+        c.setFont(use_bold, 10)
+        c.drawString(20 * mm, y, label)
+        c.setFont(use_font, 10)
+        c.drawString(70 * mm, y, str(value))
+        y -= line_h
+
+    row('Всадник(и):', riders_str)
+    row('Тренер:', trainer_str)
+    row('Лошадь(и):', horses_str)
+    row('Услуга:', service_name)
+    row('Дата проведения:', f'{date_str} в {time_str}')
+    row('Длительность:', f'{duration} мин' if duration else '—')
+    row('Цена услуги:', f'{price} ₽')
+    row('Кол-во участников:', str(max(1, len(riders) or 1)))
+    row('Статус тренировки:', w.status or 'Запланировано')
+
+    # Итог
+    y -= 4 * mm
+    c.setStrokeColorRGB(0.7, 0.7, 0.7)
+    c.line(20 * mm, y, page_w - 20 * mm, y)
+    y -= 10 * mm
+    c.setFont(use_bold, 14)
+    c.drawString(20 * mm, y, 'ИТОГО К ОПЛАТЕ:')
+    c.drawRightString(page_w - 20 * mm, y, f'{total} ₽')
+
+    # Подпись
+    y -= 30 * mm
+    c.setFont(use_font, 10)
+    c.drawString(20 * mm, y, '___________________________')
+    c.drawString(20 * mm, y - 6 * mm, 'Подпись администратора')
+
+    # Футер
+    c.setFont(use_font, 8)
+    c.setFillColorRGB(0.5, 0.5, 0.5)
+    c.drawCentredString(
+        page_w / 2,
+        15 * mm,
+        'КСК «Гардарика» — конноспортивный клуб. Спасибо, что выбираете нас!',
+    )
+
+    c.showPage()
+    c.save()
+    return buf.getvalue()
+
 # --- АБОНЕМЕНТЫ ---
 def _inflect_lessons(n):
     if n % 10 == 1 and n % 100 != 11: return f'{n} занятие'
@@ -882,7 +1084,7 @@ def register():
             return render_template_string(f"<!DOCTYPE html><html><head>{CSS_STYLE}</head><body><div class='auth-container'><div class='logo'><img src='/static/img/logo.png' alt='Logo'><span>Гардарика</span></div><h1 class='auth-title'>Регистрация</h1><div class='alert alert-error'>Логин занят</div><form method='POST'><div class='form-group'><label>Логин</label><input type='text' name='username' required></div><div class='form-group'><label>Пароль</label><input type='password' name='password' required></div><button type='submit' class='btn-primary'>Зарегистрироваться</button></form><div style='text-align:center;margin-top:20px;'><a href='/login' style='color:var(--primary);text-decoration:none;font-size:14px;'>Уже есть аккаунт? Войти</a></div></div></body></html>")
         
         rider_role = Role.query.filter_by(role_name='Rider').first()
-        u = User(username=username, password=generate_password_hash(password), idrole=rider_role.id)
+        u = User(username=username, password=generate_password_hash(password, method='pbkdf2:sha256'), idrole=rider_role.id)
         db.session.add(u)
         db.session.commit()
         session['username'] = username
@@ -919,31 +1121,31 @@ def initialize_database():
         # 5. Создаем функции и триггеры (только для Postgres)
         if is_postgres:
             try:
-
-                # 5.1. Функция автообновления статусов
+                # 5.1. Функция автообновления статусов тренировок (Запланировано -> Проводится -> Завершено)
                 db.session.execute(text("""
-                    CREATE FUNCTION fn_auto_update_workouts() 
+                    CREATE OR REPLACE FUNCTION fn_auto_update_workouts()
                     RETURNS void AS $$
                     BEGIN
                         -- Запланировано -> Проводится
-                        UPDATE workouts 
-                        SET status = 'Проводится' 
-                        WHERE status = 'Запланировано' AND datetime_start <= NOW() AT TIME ZONE 'UTC+3';
+                        UPDATE workouts
+                        SET status = 'Проводится'
+                        WHERE status = 'Запланировано'
+                          AND datetime_start <= (NOW() + interval '3 hours');
 
                         -- Проводится -> Завершено (на основе длительности услуги)
                         UPDATE workouts w
                         SET status = 'Завершено'
                         FROM services s
-                        WHERE w.idservice = s.id 
-                          AND w.status = 'Проводится' 
-                          AND (w.datetime_start + (s.duration * interval '1 minute')) <= NOW() AT TIME ZONE 'UTC+3';
+                        WHERE w.idservice = s.id
+                          AND w.status = 'Проводится'
+                          AND (w.datetime_start + (s.duration * interval '1 minute')) <= (NOW() + interval '3 hours');
                     END;
                     $$ LANGUAGE plpgsql;
                 """))
 
                 # 5.2. Функция синхронизации текстового статуса всадника
                 db.session.execute(text("""
-                    CREATE FUNCTION fn_sync_rider_status_text(r_id INTEGER) 
+                    CREATE OR REPLACE FUNCTION fn_sync_rider_status_text(r_id INTEGER)
                     RETURNS void AS $$
                     DECLARE
                         sub_bal INTEGER;
@@ -951,65 +1153,66 @@ def initialize_database():
                         status_text TEXT := '';
                     BEGIN
                         SELECT subscription_balance, rental_balance INTO sub_bal, rent_bal FROM riders WHERE id = r_id;
-                        
+
                         IF COALESCE(sub_bal, 0) > 0 THEN
                             status_text := 'Абонемент (' || sub_bal || ' зан.)';
                         END IF;
-                        
+
                         IF COALESCE(rent_bal, 0) > 0 THEN
                             IF status_text != '' THEN status_text := status_text || ' + '; END IF;
                             status_text := status_text || 'Аренда (' || rent_bal || ' зан.)';
                         END IF;
-                        
+
                         IF status_text = '' THEN status_text := 'Закончился'; END IF;
-                        
+
                         UPDATE riders SET subscription_status = status_text WHERE id = r_id;
                     END;
                     $$ LANGUAGE plpgsql;
                 """))
 
-                # 5.3. Процедура для корректировки баланса
+                # 5.3. Процедура для корректировки баланса абонемента/аренды
+                db.session.execute(text("DROP PROCEDURE IF EXISTS sp_adjust_rider_balance(INTEGER, INTEGER, TEXT);"))
                 db.session.execute(text("""
                     CREATE PROCEDURE sp_adjust_rider_balance(r_id INTEGER, amount INTEGER, b_type TEXT)
                     AS $$
                     BEGIN
                         IF b_type = 'Subscription' THEN
-                            UPDATE riders 
+                            UPDATE riders
                             SET subscription_balance = GREATEST(0, COALESCE(subscription_balance, 0) + amount)
                             WHERE id = r_id;
                         ELSIF b_type = 'Rental' THEN
-                            UPDATE riders 
+                            UPDATE riders
                             SET rental_balance = GREATEST(0, COALESCE(rental_balance, 0) + amount)
                             WHERE id = r_id;
                         END IF;
-                        
+
                         -- Обновляем текстовый статус
                         PERFORM fn_sync_rider_status_text(r_id);
                     END;
                     $$ LANGUAGE plpgsql;
                 """))
 
-                # 5.3. Триггерная функция для списания занятий
+                # 5.4. Триггерная функция списания занятий при переводе тренировки в статус "Завершено"
                 db.session.execute(text("""
-                    CREATE FUNCTION fn_deduct_lessons_trigger() 
+                    CREATE OR REPLACE FUNCTION fn_deduct_lessons_trigger()
                     RETURNS TRIGGER AS $$
                     DECLARE
                         r_id INTEGER;
                         cur_sub INTEGER;
                     BEGIN
-                        -- Обрабатываем как замену статуса, так и создание уже завершенной тренировки
-                        IF (TG_OP = 'INSERT' AND NEW.status = 'Завершено') OR 
+                        -- Обрабатываем как создание уже завершенной тренировки, так и переход в "Завершено"
+                        IF (TG_OP = 'INSERT' AND NEW.status = 'Завершено') OR
                            (TG_OP = 'UPDATE' AND (OLD.status IS NULL OR OLD.status != 'Завершено') AND NEW.status = 'Завершено') THEN
-                            
+
                             FOR r_id IN SELECT idrider FROM workout_participants WHERE idworkout = NEW.id AND idrider IS NOT NULL LOOP
                                 SELECT subscription_balance INTO cur_sub FROM riders WHERE id = r_id;
-                                
+
                                 IF COALESCE(cur_sub, 0) > 0 THEN
                                     UPDATE riders SET subscription_balance = subscription_balance - 1 WHERE id = r_id;
                                 ELSE
                                     UPDATE riders SET rental_balance = GREATEST(0, COALESCE(rental_balance, 0) - 1) WHERE id = r_id;
                                 END IF;
-                                
+
                                 PERFORM fn_sync_rider_status_text(r_id);
                             END LOOP;
                         END IF;
@@ -1018,7 +1221,8 @@ def initialize_database():
                     $$ LANGUAGE plpgsql;
                 """))
 
-                # 5.4. Создание ОГРАНИЧИТЕЛЬНОГО триггера (Constraint Trigger)
+                # 5.5. Триггер на тренировках: списание занятий при завершении (DEFERRABLE)
+                db.session.execute(text("DROP TRIGGER IF EXISTS trg_on_workout_complete ON workouts;"))
                 db.session.execute(text("""
                     CREATE CONSTRAINT TRIGGER trg_on_workout_complete
                     AFTER INSERT OR UPDATE ON workouts
@@ -1027,24 +1231,116 @@ def initialize_database():
                     EXECUTE FUNCTION fn_deduct_lessons_trigger();
                 """))
 
+                # 5.6. Функция-валидатор: запрещает добавлять в тренировку нездоровую лошадь
+                db.session.execute(text("""
+                    CREATE OR REPLACE FUNCTION fn_check_horse_status()
+                    RETURNS TRIGGER AS $$
+                    DECLARE
+                        v_status TEXT;
+                    BEGIN
+                        IF NEW.idhorse IS NULL THEN
+                            RETURN NEW;
+                        END IF;
+                        SELECT status INTO v_status FROM horses WHERE id = NEW.idhorse;
+                        IF v_status IS NOT NULL
+                           AND v_status NOT IN ('Здорова', 'В работе (Здорова)') THEN
+                            RAISE EXCEPTION 'ОШИБКА: Нельзя назначить тренировку — лошадь "%": статус %', NEW.idhorse, v_status;
+                        END IF;
+                        RETURN NEW;
+                    END;
+                    $$ LANGUAGE plpgsql;
+                """))
+
+                # 5.7. Триггер на участниках тренировки — блокировка нездоровых лошадей
+                db.session.execute(text("DROP TRIGGER IF EXISTS trg_prevent_sick_horse_booking ON workout_participants;"))
+                db.session.execute(text("""
+                    CREATE TRIGGER trg_prevent_sick_horse_booking
+                    BEFORE INSERT OR UPDATE ON workout_participants
+                    FOR EACH ROW
+                    EXECUTE FUNCTION fn_check_horse_status();
+                """))
+
+                # 5.8. Процедура: отменить все тренировки за указанный день
+                db.session.execute(text("DROP PROCEDURE IF EXISTS sp_cancel_workouts_by_date(DATE);"))
+                db.session.execute(text("""
+                    CREATE PROCEDURE sp_cancel_workouts_by_date(target_date DATE)
+                    LANGUAGE plpgsql AS $$
+                    BEGIN
+                        UPDATE workouts
+                        SET status = 'Отменено'
+                        WHERE DATE(datetime_start) = target_date
+                          AND status IN ('Запланировано', 'Проводится');
+                    END;
+                    $$;
+                """))
+
                 db.session.commit()
                 print("Database triggers and functions initialized successfully.")
             except Exception as e:
                 print(f"Failed to initialize database triggers/functions: {e}")
                 db.session.rollback()
 
-        # 6. Представление для активных абонементов
+        # 6. Представление: активные абонементы всадников
         try:
             db.session.execute(text("DROP VIEW IF EXISTS v_rider_active_subscriptions CASCADE;"))
             db.session.execute(text("""
                 CREATE VIEW v_rider_active_subscriptions AS
-                SELECT id, name, subscription_balance, rental_balance, subscription_status
+                SELECT id, name, lastname, subscription_balance, rental_balance, subscription_status
                 FROM riders
                 WHERE COALESCE(subscription_balance, 0) > 0 OR COALESCE(rental_balance, 0) > 0;
             """))
             db.session.commit()
         except Exception as e:
             print(f"Failed to create view v_rider_active_subscriptions: {e}")
+
+        # 7. Представление: сводное расписание тренировок (через workout_participants)
+        try:
+            db.session.execute(text("DROP VIEW IF EXISTS v_full_schedule CASCADE;"))
+            db.session.execute(text("""
+                CREATE VIEW v_full_schedule AS
+                SELECT
+                    w.id                                         AS workout_id,
+                    w.datetime_start                             AS "Дата и время",
+                    COALESCE(
+                        r.lastname || ' ' || r.name,
+                        wp.guest_name,
+                        'Не назначен'
+                    )                                            AS "Всадник",
+                    COALESCE(t.lastname || ' ' || t.name, 'Без тренера') AS "Тренер",
+                    COALESCE(h.name, 'Не выбрана')               AS "Лошадь",
+                    COALESCE(s.name, 'Не указана')               AS "Услуга",
+                    w.status                                     AS "Статус"
+                FROM workouts w
+                LEFT JOIN workout_participants wp ON wp.idworkout = w.id
+                LEFT JOIN riders r ON wp.idrider = r.id
+                LEFT JOIN trainers t ON w.idtrainer = t.id
+                LEFT JOIN horses h ON wp.idhorse = h.id
+                LEFT JOIN services s ON w.idservice = s.id
+                ORDER BY w.datetime_start;
+            """))
+            db.session.commit()
+        except Exception as e:
+            print(f"Failed to create view v_full_schedule: {e}")
+
+        # 8. Представление: доступные (здоровые) лошади
+        try:
+            db.session.execute(text("DROP VIEW IF EXISTS v_available_horses CASCADE;"))
+            db.session.execute(text("""
+                CREATE VIEW v_available_horses AS
+                SELECT
+                    h.id,
+                    h.name              AS "Кличка",
+                    b.breed_name        AS "Порода",
+                    h.birth_year        AS "Год рождения",
+                    h.status            AS "Статус"
+                FROM horses h
+                LEFT JOIN breeds b ON h.idbreed = b.id
+                WHERE h.status IN ('Здорова', 'В работе (Здорова)')
+                   OR h.status IS NULL;
+            """))
+            db.session.commit()
+        except Exception as e:
+            print(f"Failed to create view v_available_horses: {e}")
 
 # Инициализация при запуске (только для главного процесса или прямого запуска)
 if os.environ.get('GUNICORN_MAIN') == '1' or __name__ == '__main__':

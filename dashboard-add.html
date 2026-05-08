@@ -225,6 +225,11 @@
     <button class="btn-secondary" onclick="window.location.href='/workouts'">Назад к календарю</button>
 </div>
 <div class="card" style="max-width:1000px; margin: 0 auto;">
+    {% if error %}
+    <div role="alert" style="margin-bottom:24px; padding:14px 18px; background:#fdecea; border:1px solid #f5c2c0; color:#a31515; border-radius:8px; font-weight:600;">
+        {{ error }}
+    </div>
+    {% endif %}
     <form action="{{ url_for('workouts_edit', item_id=item.id) if item else url_for('workouts_add') }}" method="POST">
         <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:24px; margin-bottom:32px;">
             <div class="form-group">
