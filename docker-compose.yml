@@ -1,0 +1,45 @@
+version: '3.8'
+
+services:
+  web:
+    container_name: gardarika_web
+    image: gardarika_web:latest
+    build: .
+    ports:
+      - "80:8000"
+    volumes:
+      - ./:/app
+    environment:
+      - DATABASE_URL=postgresql://gardarika:SP129sGZFHNC@db:5432/gardarika_db
+    restart: always
+    depends_on:
+      - db
+
+  db:
+    container_name: gardarika_db
+    image: postgres:15
+    restart: always
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: gardarika
+      POSTGRES_PASSWORD: SP129sGZFHNC
+      POSTGRES_DB: gardarika_db
+    volumes:
+      - design_pgdata:/var/lib/postgresql/data
+
+  pgadmin:
+    container_name: gardarika_pgadmin
+    image: dpage/pgadmin4
+    restart: always
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@gardarika.ru
+      PGADMIN_DEFAULT_PASSWORD: admin123
+    ports:
+      - "5050:80"
+    depends_on:
+      - db
+
+volumes:
+  design_pgdata:
+    external: true

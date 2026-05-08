@@ -1,0 +1,30 @@
+#!/usr/bin/expect -f
+set timeout 300
+set password "SP129sGZFHNC"
+set host "185.112.59.112"
+set user "root"
+set local_dir "./"
+set remote_dir "/root/дизайн/"
+
+# Sync files
+# Using -r to sync directory contents
+spawn rsync -avz --exclude '.*' --exclude '__pycache__' --exclude 'backups' --exclude 'venv' --exclude 'locate_remote_project.sh' --exclude 'inspect_remote.sh' --exclude 'read_remote_deploy.sh' $local_dir $user@$host:$remote_dir
+expect {
+    "*yes/no*" {
+        send "yes\r"
+        exp_continue
+    }
+    "*password:*" {
+        send "$password\r"
+    }
+}
+expect eof
+
+# Restart container
+spawn ssh $user@$host "cd $remote_dir && docker-compose restart web"
+expect {
+    "*password:*" {
+        send "$password\r"
+    }
+}
+expect eof

@@ -1,0 +1,39 @@
+<body>
+    <aside class="sidebar">
+        <div class="logo-container">
+            <button class="logo-btn" onclick="toggleLogoMenu(event)">
+                <img src="/static/img/logo.png" alt="Гардарика">
+                <span>Гардарика</span>
+            </button>
+            <div id="logoMenu" class="logo-dropdown">
+                <a href="/logout" class="logo-dropdown-item">🚪 Выйти</a>
+                <a href="#" class="logo-dropdown-item" onclick="alert('Смена пароля скоро появится')">🔑 Сменить пароль</a>
+                {% if is_admin %}<hr style="margin:8px 0; border:0; border-top:1px solid var(--border);"><a href="#" class="logo-dropdown-item" style="color:#ef4444;" onclick="if(confirm('Удалить аккаунт?'))">🗑️ Удалить учётную запись</a>{% endif %}
+            </div>
+        </div>
+        <nav class="nav-menu">
+            <a href="/dashboard" class="nav-item">Дашборд</a><a href="/workouts" class="nav-item">Тренировки</a><a href="/riders" class="nav-item">Всадники</a><a href="/trainers" class="nav-item">Тренеры</a><a href="/horses" class="nav-item">Лошади</a><a href="/services" class="nav-item">Услуги</a>
+        </nav>
+    </aside>
+    <div class="mobile-header"><div style="display:flex; align-items:center; gap:8px;"><img src="/static/img/logo.png" style="width:32px;"><span style="font-weight:700; color:var(--primary);">ГАРДАРИКА</span></div><button class="menu-toggle" onclick="toggleSidebar()">☰</button></div>
+<main class="main-content"><div class="header"><h1 class="page-title">{{ 'Редактировать всадника' if item else 'Новый всадник' }}</h1><a href="/riders" class="btn-secondary">Назад</a></div><div class="form-card"><form action="{{ url_for('riders_edit', item_id=item.id) if item else url_for('riders_add') }}" method="POST" enctype="multipart/form-data"><div class="form-grid"><div class="form-group"><label class="form-label">ФИО</label><input type="text" name="name" class="form-input" value="{{ item.name if item }}" required></div><div class="form-group"><label class="form-label">Телефон</label><input type="text" name="phone" class="form-input" value="{{ item.phone if item }}"></div><div class="form-group"><label class="form-label">День рождения</label><input type="date" name="dob" class="form-input" value="{{ item.dob if item }}"></div><div class="form-group"><label class="form-label">Абонемент</label><select name="status" class="form-input filter-select"><option value="Без абонемента" {% if item and 'Без' in item.status %}selected{% endif %}>Без абонемента</option><option value="Абонемент (4 дня)" {% if item and '4' in item.status %}selected{% endif %}>4 дня</option><option value="Абонемент (8 дней)" {% if item and '8' in item.status %}selected{% endif %}>8 дней</option></select></div><div class="form-group full-width"><label class="form-label">Фото</label><input type="file" name="photo" class="form-input"></div><div class="form-group full-width"><label class="form-label">Заметки</label><textarea name="notes" class="form-input">{{ item.notes if item }}</textarea></div></div><div style="display:flex; justify-content:flex-end;"><button type="submit" class="btn-primary">Сохранить</button></div></form></div></main>
+    <script>
+        function toggleLogoMenu(e) { e.stopPropagation(); document.getElementById('logoMenu').classList.toggle('active'); }
+        function toggleSidebar() { document.querySelector('.sidebar').classList.toggle('active'); }
+        function showSubModal( riderId, riderName ) {
+            const modal = document.getElementById('sub-modal-overlay');
+            if(modal) {
+                document.getElementById('sub-modal-title').textContent = 'Абонемент: ' + riderName;
+                document.getElementById('sub-form').action = '/riders/' + riderId + '/subscription';
+                modal.classList.add('open');
+            }
+        }
+        function closeSubModal() { document.getElementById('sub-modal-overlay').classList.remove('open'); }
+        function selectSub(v) { document.getElementById('sub-value').value = v; document.getElementById('sub-form').submit(); }
+        document.addEventListener('click', (e) => {
+            if (document.getElementById('logoMenu')) document.getElementById('logoMenu').classList.remove('active');
+            if (document.querySelector('.sidebar') && !e.target.closest('.sidebar') && !e.target.closest('.menu-toggle')) document.querySelector('.sidebar').classList.remove('active');
+            if (e.target.id === 'sub-modal-overlay') closeSubModal();
+        });
+    </script>
+</body>

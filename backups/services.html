@@ -1,0 +1,39 @@
+<body>
+    <aside class="sidebar">
+        <div class="logo-container">
+            <button class="logo-btn" onclick="toggleLogoMenu(event)">
+                <img src="/static/img/logo.png" alt="Гардарика">
+                <span>Гардарика</span>
+            </button>
+            <div id="logoMenu" class="logo-dropdown">
+                <a href="/logout" class="logo-dropdown-item">🚪 Выйти</a>
+                <a href="#" class="logo-dropdown-item" onclick="alert('Смена пароля скоро появится')">🔑 Сменить пароль</a>
+                {% if is_admin %}<hr style="margin:8px 0; border:0; border-top:1px solid var(--border);"><a href="#" class="logo-dropdown-item" style="color:#ef4444;" onclick="if(confirm('Удалить аккаунт?'))">🗑️ Удалить учётную запись</a>{% endif %}
+            </div>
+        </div>
+        <nav class="nav-menu">
+            <a href="/dashboard" class="nav-item">Дашборд</a><a href="/workouts" class="nav-item">Тренировки</a><a href="/riders" class="nav-item">Всадники</a><a href="/trainers" class="nav-item">Тренеры</a><a href="/horses" class="nav-item">Лошади</a><a href="/services" class="nav-item">Услуги</a>
+        </nav>
+    </aside>
+    <div class="mobile-header"><div style="display:flex; align-items:center; gap:8px;"><img src="/static/img/logo.png" style="width:32px;"><span style="font-weight:700; color:var(--primary);">ГАРДАРИКА</span></div><button class="menu-toggle" onclick="toggleSidebar()">☰</button></div>
+<main class="main-content"><div class="header"><h1 class="page-title">{{ 'Редактировать услугу' if item else 'Новая услуга' }}</h1><a href="/services" class="btn-secondary">Назад</a></div><div class="form-card"><form action="{{ url_for('services_edit', item_id=item.id) if item else url_for('services_add') }}" method="POST"><div class="form-grid"><div class="form-group"><label class="form-label">Название</label><input type="text" name="name" class="form-input" value="{{ item.name if item }}" required></div><div class="form-group"><label class="form-label">Длительность (мин)</label><input type="number" name="duration" class="form-input" value="{{ item.duration if item }}"></div><div class="form-group"><label class="form-label">Цена</label><input type="number" name="price" class="form-input" value="{{ item.price if item }}"></div><div class="form-group"><label class="form-label">Тип</label><input type="text" name="type" class="form-input" value="{{ item.type if item }}"></div></div><div style="display:flex; justify-content:flex-end;"><button type="submit" class="btn-primary">Сохранить</button></div></form></div></main>
+    <script>
+        function toggleLogoMenu(e) { e.stopPropagation(); document.getElementById('logoMenu').classList.toggle('active'); }
+        function toggleSidebar() { document.querySelector('.sidebar').classList.toggle('active'); }
+        function showSubModal( riderId, riderName ) {
+            const modal = document.getElementById('sub-modal-overlay');
+            if(modal) {
+                document.getElementById('sub-modal-title').textContent = 'Абонемент: ' + riderName;
+                document.getElementById('sub-form').action = '/riders/' + riderId + '/subscription';
+                modal.classList.add('open');
+            }
+        }
+        function closeSubModal() { document.getElementById('sub-modal-overlay').classList.remove('open'); }
+        function selectSub(v) { document.getElementById('sub-value').value = v; document.getElementById('sub-form').submit(); }
+        document.addEventListener('click', (e) => {
+            if (document.getElementById('logoMenu')) document.getElementById('logoMenu').classList.remove('active');
+            if (document.querySelector('.sidebar') && !e.target.closest('.sidebar') && !e.target.closest('.menu-toggle')) document.querySelector('.sidebar').classList.remove('active');
+            if (e.target.id === 'sub-modal-overlay') closeSubModal();
+        });
+    </script>
+</body>

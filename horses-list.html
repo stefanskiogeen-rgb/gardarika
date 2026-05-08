@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Gardarika | Equestrian Management</title>
+    <link rel="icon" type="image/png" href="{{ url_for('static', filename='img/favicon.png') }}">
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <style>
+        :root { 
+            --primary: #1B3022; --primary-light: #2C4A3B; --accent: #C5A059; 
+            --bg-main: #FBF9F7; --surface: #FFFFFF; --text-main: #1A1A1A; 
+            --text-muted: #7A7A7A; --border: #E8E5DF; --danger: #D72C2C;
+            --success: #1E7D32; --info: #2C7BE5; --shadow: 0 12px 30px rgba(27,48,34,0.06);
+            --radius-lg: 24px; --radius-md: 12px;
+        }
+        * { margin:0; padding:0; box-sizing:border-box; font-family:'Outfit',sans-serif; }
+        body { background:var(--bg-main); color:var(--text-main); display:flex; height:100vh; overflow:hidden; }
+        a { text-decoration:none; color:inherit; transition:0.3s; }
+        
+        .sidebar { width:260px; background:var(--surface); border-right:1px solid var(--border); display:flex; flex-direction:column; padding:32px 24px; flex-shrink:0; }
+        .logo { display:flex; align-items:center; gap:12px; cursor:pointer; }
+        .sidebar .logo { margin-bottom:40px; }
+        .logo:hover { opacity:0.8; }
+        .logo img { width:36px; height:36px; border-radius:10px; }
+        .logo span { font-size:16px; font-weight:800; color:var(--primary); text-transform:uppercase; letter-spacing:1px; }
+
+        .nav-menu { display:flex; flex-direction:column; gap:8px; flex:1; }
+        .nav-item { display:flex; align-items:center; padding:12px 16px; border-radius:var(--radius-md); font-size:14px; font-weight:600; color:var(--text-muted); }
+        .nav-item:hover { background:rgba(27,48,34,0.04); color:var(--primary); }
+        .nav-item.active { background:var(--primary); color:white; box-shadow:0 8px 24px rgba(27,48,34,0.18); }
+
+        .main-content { flex:1; padding:48px; overflow-y:auto; -webkit-overflow-scrolling: touch; }
+        .header { display:flex; justify-content:space-between; align-items:center; margin-bottom:36px; }
+        .page-title { font-size:32px; font-weight:800; color:var(--primary); letter-spacing:-0.5px; }
+
+        .card { background:var(--surface); border-radius:var(--radius-lg); padding:32px; border:1px solid var(--border); box-shadow:var(--shadow); margin-bottom:24px; }
+        .table-wrap { background:var(--surface); border-radius:var(--radius-lg); border:1px solid var(--border); overflow-x:auto; }
+        table { width:100%; border-collapse:collapse; min-width: 650px; }
+        th { text-align:left; padding:18px 24px; font-size:11px; font-weight:800; color:var(--text-muted); text-transform:uppercase; background:#FAFAFA; border-bottom:1px solid var(--border); letter-spacing:1px; }
+        td { padding:18px 24px; border-bottom:1px solid var(--border); font-size:14px; vertical-align:middle; line-height:1.5; }
+        
+        .btn-primary { background:var(--primary); color:white; padding:14px 28px; border-radius:var(--radius-md); border:none; cursor:pointer; font-weight:700; font-size:14px; transition:0.3s cubic-bezier(0.4, 0, 0.2, 1); }
+        .btn-primary:hover { transform:translateY(-2px); box-shadow:0 12px 24px rgba(27,48,34,0.2); }
+        .btn-primary:active { transform:translateY(0); }
+        .btn-secondary { background:var(--surface); color:var(--primary); border:1px solid var(--border); padding:14px 28px; border-radius:var(--radius-md); cursor:pointer; font-weight:700; font-size:14px; transition:0.3s; }
+        .btn-secondary:hover { background:var(--bg-main); border-color:var(--primary); }
+        .btn-icon { width:38px; height:38px; border-radius:10px; border:1px solid var(--border); background:white; display:inline-flex; align-items:center; justify-content:center; color:var(--text-muted); cursor:pointer; transition:0.3s; }
+        .btn-icon:hover { color:var(--primary); border-color:var(--primary); background: rgba(27,48,34,0.04); transform:scale(1.05); }
+
+        .badge { padding:10px 20px; border-radius:999px; font-size:11px; font-weight:800; text-transform:uppercase; letter-spacing:0.8px; border:none; cursor:pointer; display:inline-flex; align-items:center; justify-content:center; }
+        .badge-success { background:#E6F4EA; color:#1E7D32; }
+        .badge-info { background:#E7F0FD; color:#2C7BE5; }
+        .badge-neutral { background:#F3F4F6; color:#7A7A7A; }
+        .badge-danger { background:var(--danger); color:white; box-shadow: 0 4px 12px rgba(215, 44, 44, 0.2); }
+
+        .search-container { position: relative; margin-bottom: 24px; }
+        .search-input { width: 100%; padding: 14px 20px 14px 48px; border-radius: 16px; border: 1.5px solid var(--border); background: var(--surface); font-size: 14px; font-weight: 500; outline: none; transition: 0.3s; }
+        .search-input:focus { border-color: var(--primary); box-shadow: 0 8px 24px rgba(27,48,34,0.05); }
+        .search-icon { position: absolute; left: 18px; top: 50%; transform: translateY(-50%); color: var(--text-muted); pointer-events: none; }
+
+        .form-label { font-size:11px; font-weight:800; color:var(--text-muted); text-transform:uppercase; letter-spacing:1px; margin-bottom:10px; display:block; }
+        .form-input { 
+            width:100%; padding:14px 18px; border-radius:var(--radius-md); border:1.5px solid var(--border); background:#FFFFFF; font-size:14px; font-weight:500; outline:none; transition:all 0.3s ease; color:var(--text-main);
+            appearance: none; -webkit-appearance: none;
+        }
+        .form-input:focus { border-color:var(--primary); box-shadow: 0 0 0 4px rgba(27,48,34,0.08); background: #FFF; }
+        
+        select.form-input {
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='%231B3022' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+            background-repeat: no-repeat; background-position: right 14px center; background-size: 18px; padding-right: 44px;
+        }
+
+        .participant-card { background:rgba(27,48,34,0.02); border:1px dashed var(--border); border-radius:16px; padding:20px; margin-top:16px; display:grid; grid-template-columns:1fr 1fr auto; gap:20px; align-items:flex-end; }
+
+        .mobile-nav { display:none; position:fixed; bottom:0; left:0; right:0; background:rgba(255,255,255,0.98); backdrop-filter:blur(20px); border-top:1px solid var(--border); padding:12px 20px 28px; justify-content:space-between; z-index:2000; }
+        .m-nav-item { display:flex; flex-direction:column; align-items:center; gap:6px; color:var(--text-muted); flex:1; font-size:10px; font-weight:800; text-transform:uppercase; cursor:pointer; }
+        .m-nav-item.active { color:var(--primary); }
+        .m-nav-item svg { width:24px; height:24px; stroke-width: 2.5; }
+
+        .modal { display:none; position:fixed; z-index:5000; left:0; top:0; width:100%; height:100%; background:rgba(27,48,34,0.4); backdrop-filter:blur(8px); align-items:center; justify-content:center; }
+        .modal-content { background:white; padding:40px; border-radius:32px; width:100%; max-width:440px; box-shadow:0 40px 80px rgba(0,0,0,0.15); border:1px solid var(--border); }
+
+        .option-tile { display:flex; align-items:center; justify-content:space-between; width:100%; padding:24px; border-radius:18px; border:1.5px solid var(--border); background:var(--bg-main); font-weight:800; font-size:15px; color:var(--text-main); cursor:pointer; transition:0.3s; margin-bottom:14px; }
+        .option-tile:hover { border-color:var(--primary); background:white; transform:translateY(-3px); box-shadow:0 12px 24px rgba(0,0,0,0.06); }
+        .option-tile svg { opacity:0; color:var(--success); width:22px; height:22px; transition:0.3s; }
+        .option-tile.selected { border-color:var(--primary); background:rgba(27,48,34,0.04); }
+        .option-tile.selected svg { opacity:1; }
+
+        .menu-drawer { display:none; position:fixed; bottom:90px; left:20px; right:20px; background:white; border-radius:24px; box-shadow:0 20px 50px rgba(0,0,0,0.15); border:1px solid var(--border); z-index:4000; padding:20px; flex-direction:column; gap:10px; }
+        .menu-drawer-item { display:flex; align-items:center; padding:14px 20px; border-radius:14px; font-size:15px; font-weight:700; color:var(--text-main); }
+        .menu-drawer-item:hover { background:var(--bg-main); }
+
+        .mobile-header { display:none; position:fixed; top:0; left:0; right:0; height:70px; background:white; border-bottom:1px solid var(--border); padding:0 24px; align-items:center; justify-content:space-between; z-index:3000; }
+
+        @media (max-width:768px) {
+            body { flex-direction:column; height:auto; overflow:visible; }
+            .sidebar { display:none; }
+            .mobile-header { display:flex; }
+            .main-content { padding:100px 20px 100px; overflow:visible; height:auto; }
+            .mobile-nav { display:flex; }
+            .header { flex-direction:column; align-items:flex-start; gap:16px; margin-bottom:32px; }
+            .page-title { font-size:28px; }
+            .participant-card { grid-template-columns: 1fr; gap:16px; }
+        }
+    </style>
+</head>
+<body>
+    <header class="mobile-header">
+        <div style="font-size:18px; font-weight:800; color:var(--primary); text-transform:uppercase; letter-spacing:1px;">Gardarika</div>
+        <div class="logo" onclick="showProfileModal()" style="cursor:pointer" onclick="showProfileModal()"><img src="/static/img/logo.png"></div>
+    </header>
+    <aside class="sidebar">
+        <div class="logo" onclick="showProfileModal()" style="cursor:pointer" onclick="showProfileModal()"><img src="/static/img/logo.png"><span>Gardarika</span></div>
+        <nav class="nav-menu">
+            <a href="/dashboard" class="nav-item {{'active' if 'dashboard' in request.path}}">📊 Дашборд</a>
+            <a href="/workouts" class="nav-item {{'active' if 'workouts' in request.path}}">🏇 Тренировки</a>
+            <a href="/riders" class="nav-item {{'active' if 'riders' in request.path}}">👤 Всадники</a>
+            <a href="/horses" class="nav-item {{'active' if 'horses' in request.path}}">🐎 Лошади</a>
+            <a href="/trainers" class="nav-item {{'active' if 'trainers' in request.path}}">🎓 Тренеры</a>
+            <a href="/services" class="nav-item {{'active' if 'services' in request.path}}">💰 Услуги</a>
+            {% if is_super_admin %}
+            <a href="/admin/users" class="nav-item {{'active' if 'admin/users' in request.path}}">⚙️ Админ-панель</a>
+            {% endif %}
+            
+        </nav>
+    </aside>
+    <div id="menuDrawer" class="menu-drawer">
+        <a href="/horses" class="menu-drawer-item">🐎 Лошади</a>
+        <a href="/trainers" class="menu-drawer-item">🎓 Тренеры</a>
+        <a href="/services" class="menu-drawer-item">💰 Услуги</a>
+        {% if is_super_admin %}
+        <a href="/admin/users" class="menu-drawer-item">⚙️ Админ-панель</a>
+        {% endif %}
+        <hr style="border:none; border-top:1px solid var(--border); margin:10px 0;">
+        
+    </div>
+    <nav class="mobile-nav">
+        <a href="/dashboard" class="m-nav-item {{'active' if 'dashboard' in request.path}}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect></svg><span>Меню</span></a>
+        <a href="/workouts" class="m-nav-item {{'active' if 'workouts' in request.path}}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20M2 12h20"></path></svg><span>Занятия</span></a>
+        <a href="/riders" class="m-nav-item {{'active' if 'riders' in request.path}}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg><span>Всадники</span></a>
+        <div class="m-nav-item" onclick="toggleMenuDrawer()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></svg><span>Еще</span></div>
+    </nav>
+    
+    <div id="commonModal" class="modal" onclick="if(event.target==this)closeModal()"><div class="modal-content">
+        <h3 id="modalTitle" style="margin-bottom:32px; font-weight:800; font-size:22px; color:var(--primary);">Заголовок</h3>
+        <form id="modalForm" method="POST">
+            <input type="hidden" id="modalValue" name="value">
+            <div id="modalBody"></div>
+            <button type="button" class="btn-secondary" style="width:100%; margin-top:16px;" onclick="closeModal()">Отмена</button>
+        </form>
+    </div></div>
+
+    
+    <!-- Profile Modal -->
+    <div id="profileModal" class="modal" onclick="if(event.target==this)closeProfileModal()">
+        <div class="modal-content">
+            <h3 style="margin-bottom:24px; font-weight:800; font-size:22px; color:var(--primary);">Мой профиль</h3>
+            <p style="margin-bottom:12px; font-size:14px; color:var(--text-muted);">Вы вошли как <b>{{current_user}}</b></p>
+            
+            <form action="/profile/change_password" method="POST" style="margin-bottom:32px;">
+                <label style="display:block; font-size:11px; font-weight:800; color:var(--text-muted); text-transform:uppercase; margin-bottom:8px;">Сменить пароль</label>
+                <input type="password" name="new_password" class="form-input" placeholder="Новый пароль" required style="margin-bottom:12px;">
+                <button type="submit" class="btn-primary" style="width:100%;">Обновить пароль</button>
+            </form>
+
+            <a href="/logout" class="btn-secondary" style="width:100%; color:var(--danger); border-color:var(--danger); display: flex; align-items: center; justify-content: center; gap: 8px;">🚪 Выйти из аккаунта</a>
+
+            <form action="/profile/delete_account" method="POST" onsubmit="return confirm('Вы уверены, что хотите БЕЗВОЗВРАТНО удалить свой аккаунт?')" style="margin-top:12px;">
+                <button type="submit" class="btn-secondary" style="width:100%; color:var(--danger); border-color:var(--danger); opacity: 0.6; font-size: 11px; padding: 8px;">Удалить аккаунт</button>
+            </form>
+            
+            <button class="btn-secondary" style="width:100%; margin-top:16px;" onclick="closeProfileModal()">Закрыть</button>
+        </div>
+    </div>
+
+
+    <script>
+        function toggleMenuDrawer(){ const d=document.getElementById('menuDrawer'); d.style.display=d.style.display==='flex'?'none':'flex'; }
+        function closeModal(){ document.getElementById('commonModal').style.display='none'; }
+        function showProfileModal(){ document.getElementById('profileModal').style.display='flex'; }
+        function closeProfileModal(){ document.getElementById('profileModal').style.display='none'; }
+        
+        function selectAndSubmit(val, fieldName) {
+            const f = document.getElementById('modalForm');
+            const hidden = document.getElementById('modalValue');
+            hidden.name = fieldName;
+            hidden.value = val;
+            f.submit();
+        }
+
+        function showSubModal(id, name) {
+            document.getElementById('modalTitle').innerText = 'Абонемент: ' + name;
+            document.getElementById('modalForm').action = '/riders/' + id + '/subscription';
+            const options = [
+                {v:'Абонемент (4 занятия)', t:'4 занятия'},
+                {v:'Абонемент (8 занятий)', t:'8 занятий'},
+                {v:'Нет абонемента', t:'Удалить абонемент'}
+            ];
+            document.getElementById('modalBody').innerHTML = options.map(o => `
+                <div class="option-tile" onclick="selectAndSubmit('${o.v}', 'subscription')">
+                    <span>${o.t}</span>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                </div>
+            `).join('');
+            document.getElementById('commonModal').style.display = 'flex';
+        }
+        
+        function showStatusModal(id, current) {
+            document.getElementById('modalTitle').innerText = 'Статус тренировки';
+            document.getElementById('modalForm').action = '/workouts/' + id + '/status';
+            const options = [
+                {v:'Запланировано', t:'Запланировано'},
+                {v:'Проводится', t:'Проводится'},
+                {v:'Завершено', t:'Завершено'},
+                {v:'Отменено', t:'Отменено'}
+            ];
+            document.getElementById('modalBody').innerHTML = options.map(o => `
+                <div class="option-tile ${current===o.v?'selected':''}" onclick="selectAndSubmit('${o.v}', 'status')">
+                    <span>${o.t}</span>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                </div>
+            `).join('');
+            document.getElementById('commonModal').style.display = 'flex';
+        }
+        function filterTable() {
+            const input = document.getElementById('tableSearch');
+            const filter = input.value.toUpperCase();
+            const table = document.querySelector('table');
+            const tr = table.getElementsByTagName('tr');
+
+            for (let i = 1; i < tr.length; i++) {
+                const td = tr[i].getElementsByTagName('td');
+                let found = false;
+                for (let j = 0; j < td.length - 1; j++) {
+                    if (td[j].textContent.toUpperCase().indexOf(filter) > -1) {
+                        found = true;
+                        break;
+                    }
+                }
+                tr[i].style.display = found ? "" : "none";
+            }
+        }
+    </script>
+    <main class="main-content">
+
+    <div class="header">
+        <h1 class="page-title">Лошади</h1>
+        {% if is_admin %}<button class="btn-primary" onclick="window.location.href='/horses/add'">+ Добавить лошадь</button>{% endif %}
+    </div>
+
+    <div class="search-container">
+        <svg class="search-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+        <input type="text" id="tableSearch" class="search-input" placeholder="Поиск по кличкам, породам или статусам..." onkeyup="filterTable()">
+    </div>
+    <div class="table-wrap">
+        <table>
+            <thead><tr><th>Кличка</th><th>Порода</th><th>Статус</th>{% if is_admin %}<th>Действия</th>{% endif %}</tr></thead>
+            <tbody>
+                {% for h in horses %}
+                <tr>
+                    <td><div style="display:flex; align-items:center; gap:16px;">{% if h.photo %}<img src="/static/uploads/{{h.photo}}" style="width:48px; height:48px; border-radius:14px; object-fit:cover; border:1px solid var(--border);">{% else %}<div style="width:48px; height:48px; border-radius:14px; background:rgba(27,48,34,0.05); color:var(--primary); display:flex; align-items:center; justify-content:center; font-weight:800; font-size:18px;">{{h.name[0]}}</div>{% endif %}<b>{{h.name|default('—', true)}}</b></div></td>
+                    <td>{{h.breed.name if h.breed else '—'}}</td>
+                    <td><span class="badge badge-success">{{h.status|default('В работе', true)}}</span></td>
+                    {% if is_admin %}
+                    <td>
+                        <div style="display:flex; gap:10px;">
+                            <button class="btn-icon" onclick="window.location.href='/horses/edit/{{h.id}}'">✎</button>
+                            <form action="/horses/delete/{{h.id}}" method="POST" onsubmit="return confirm('Удалить лошадь?')"><button type="submit" class="btn-icon" style="color:var(--danger)">🗑</button></form>
+                        </div>
+                    </td>
+                    {% endif %}
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    </main>
+</body>
+</html>
