@@ -175,7 +175,7 @@ def seed_users():
     users = [
         User(
             username="superadmin",
-            password=generate_password_hash("admin"),
+            password=generate_password_hash("admin", method='pbkdf2:sha256'),
             email="super@gardarika.local",
             first_name="Главный",
             last_name="Администратор",
@@ -183,7 +183,7 @@ def seed_users():
         ),
         User(
             username="admin",
-            password=generate_password_hash("admin"),
+            password=generate_password_hash("admin", method='pbkdf2:sha256'),
             email="admin@gardarika.local",
             first_name="Иван",
             last_name="Админов",
@@ -195,7 +195,7 @@ def seed_users():
         users.append(
             User(
                 username=f"trainer{i}",
-                password=generate_password_hash("trainer"),
+                password=generate_password_hash("trainer", method='pbkdf2:sha256'),
                 email=f"trainer{i}@gardarika.local",
                 first_name=TRAINER_FIRST_NAMES[i - 1],
                 last_name=TRAINER_LAST_NAMES[i - 1],
@@ -207,7 +207,7 @@ def seed_users():
         users.append(
             User(
                 username=f"rider{i}",
-                password=generate_password_hash("rider"),
+                password=generate_password_hash("rider", method='pbkdf2:sha256'),
                 email=f"rider{i}@gardarika.local",
                 first_name=RIDER_FIRST_NAMES[i - 1],
                 last_name=RIDER_LAST_NAMES[i - 1],
