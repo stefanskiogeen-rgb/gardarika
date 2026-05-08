@@ -930,18 +930,25 @@ def build_workout_receipt_pdf(w):
     from reportlab.pdfbase import pdfmetrics
     from reportlab.pdfbase.ttfonts import TTFont
 
-    # Регистрируем шрифт с поддержкой кириллицы (DejaVu Sans есть на большинстве Linux-систем)
+    # Регистрируем шрифт с поддержкой кириллицы.
+    # Сначала ищем рядом с проектом (static/fonts/DejaVuSans*.ttf — лежат в репо,
+    # работает на любой ОС: Windows / macOS / Linux), потом — системные пути.
     font_name = 'DejaVu'
     bold_name = 'DejaVu-Bold'
+    bundled_dir = os.path.join(BASE_DIR, 'static', 'fonts')
     candidates = [
+        os.path.join(bundled_dir, 'DejaVuSans.ttf'),
         '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
         '/usr/share/fonts/dejavu/DejaVuSans.ttf',
         '/Library/Fonts/DejaVuSans.ttf',
+        '/System/Library/Fonts/Supplemental/Arial Unicode.ttf',
     ]
     bold_candidates = [
+        os.path.join(bundled_dir, 'DejaVuSans-Bold.ttf'),
         '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf',
         '/usr/share/fonts/dejavu/DejaVuSans-Bold.ttf',
         '/Library/Fonts/DejaVuSans-Bold.ttf',
+        '/System/Library/Fonts/Supplemental/Arial Unicode.ttf',
     ]
     regular_path = next((p for p in candidates if os.path.exists(p)), None)
     bold_path = next((p for p in bold_candidates if os.path.exists(p)), None)
@@ -950,7 +957,7 @@ def build_workout_receipt_pdf(w):
     if bold_path and bold_name not in pdfmetrics.getRegisteredFontNames():
         pdfmetrics.registerFont(TTFont(bold_name, bold_path))
     use_font = font_name if regular_path else 'Helvetica'
-    use_bold = bold_name if bold_path else 'Helvetica-Bold'
+    use_bold = bold_name if bold_path else (font_name if regular_path else 'Helvetica-Bold')
 
     # Подготовка данных
     riders = []

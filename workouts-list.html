@@ -715,6 +715,7 @@
                         <th>Дата / Время</th>
                         <th>Участники (Всадник — Лошадь)</th>
                         <th>Тренер</th>
+                        <th>Услуга</th>
                         <th>Статус</th>{% if is_admin %}<th>Действия</th>{% endif %}
                     </tr>
                 </thead>
@@ -731,6 +732,7 @@
                             {% endfor %}
                         </td>
                         <td>{{w.trainer|default('—', true)}}</td>
+                        <td>{% if w.service_rel %}<b>{{ w.service_rel.name }}</b><span style="display:block; color:var(--text-muted); font-size:12px; font-weight:700;">{{ w.service_rel.price }} ₽ · {{ w.service_rel.duration }} мин</span>{% else %}—{% endif %}</td>
                         <td><button
                                 class="badge {{'badge-success' if w.status == 'Запланировано' else 'badge-info' if w.status == 'Проводится' else 'badge-neutral'}}"
                                 {% if is_admin %}onclick="showStatusModal('{{w.id}}', '{{w.status}}')" {% else
