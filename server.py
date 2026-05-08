@@ -9,6 +9,7 @@ from functools import wraps
 from werkzeug.security import generate_password_hash, check_password_hash
 from flask import Flask, request, redirect, url_for, session, render_template, jsonify, render_template_string, send_file, abort
 from flask_sqlalchemy import SQLAlchemy
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy import text, func
 
 # Инициализация Flask
@@ -741,6 +742,41 @@ def workouts_list():
     return render_template('workouts-list.html', workouts=workouts, current_date=effective_date, show_all=show_all)
 
 
+def _friendly_db_error(exc):
+    """Извлекает человеко-читаемое сообщение из ошибки PostgreSQL (RAISE EXCEPTION)."""
+    msg = str(getattr(exc, 'orig', exc))
+    for line in msg.splitlines():
+        line = line.strip()
+        if line.startswith('ОШИБКА:') or line.startswith('ERROR:'):
+            return line
+    return msg.splitlines()[0] if msg else 'Не удалось сохранить тренировку.'
+
+
+def _render_workouts_form(item=None, error=None):
+    """Перерисовывает форму /workouts/add|edit с сохранением контекста и текстом ошибки."""
+    p_data = []
+    if item is not None:
+        for p in getattr(item, 'participants', []) or []:
+            p_data.append({
+                'rider_id': p.idrider if p.idrider else 'guest',
+                'guest_name': p.guest_name or '',
+                'horse_id': p.idhorse or ''
+            })
+    now_msk = datetime.utcnow() + timedelta(hours=3)
+    return render_template(
+        'dashboard-add.html',
+        item=item,
+        participants_json=json.dumps(p_data),
+        trainers=Trainer.query.all(),
+        riders=Rider.query.all(),
+        horses=Horse.query.all(),
+        services=Service.query.all(),
+        default_date=now_msk.strftime('%Y-%m-%d'),
+        default_time=now_msk.strftime('%H:%M'),
+        error=error,
+    )
+
+
 @app.route('/workouts/add', methods=['GET', 'POST'])
 @login_required
 def workouts_add():
@@ -773,8 +809,11 @@ def workouts_add():
             db.session.add(p)
             
         # Если статус сразу "Завершено", списание произойдет автоматически через триггер БД
-            
-        db.session.commit()
+        try:
+            db.session.commit()
+        except SQLAlchemyError as e:
+            db.session.rollback()
+            return _render_workouts_form(error=_friendly_db_error(e))
         return redirect(url_for('workouts_list'))
     
     # Defaults in MSK (UTC+3)
@@ -821,8 +860,11 @@ def workouts_edit(item_id):
             p.idhorse = int(p_horses[i]) if i < len(p_horses) and p_horses[i] else None
             db.session.add(p)
             
-        db.session.commit()
-        db.session.commit()
+        try:
+            db.session.commit()
+        except SQLAlchemyError as e:
+            db.session.rollback()
+            return _render_workouts_form(item=w, error=_friendly_db_error(e))
         return redirect(url_for('workouts_list'))
     
     # Подготовка данных для редактирования (JSON для JS)
