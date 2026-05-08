@@ -6,6 +6,13 @@ import re
 import logging
 from datetime import datetime, timedelta
 from functools import wraps
+
+try:
+    from dotenv import load_dotenv
+    load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), '.env'))
+except ImportError:
+    pass
+
 from werkzeug.security import generate_password_hash, check_password_hash
 from flask import Flask, request, redirect, url_for, session, render_template, jsonify, render_template_string, send_file, abort
 from flask_sqlalchemy import SQLAlchemy
