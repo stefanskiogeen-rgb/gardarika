@@ -3,17 +3,34 @@ import json
 import uuid
 import re
 import logging
+import secrets
 from datetime import datetime, timedelta
 from functools import wraps
 from werkzeug.security import generate_password_hash, check_password_hash
-from flask import Flask, request, redirect, url_for, session, render_template, jsonify, render_template_string
+from flask import Flask, request, redirect, url_for, session, render_template, jsonify, render_template_string, g
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import text, func
+from sqlalchemy.exc import OperationalError, SQLAlchemyError
+
+logger = logging.getLogger(__name__)
 
 # Инициализация Flask
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 app = Flask(__name__, template_folder='.')
-app.secret_key = 'super_secret_key_gardarika'
+
+# A3: SECRET_KEY из окружения. Хардкод убран — подделка сессий по содержимому
+# репозитория больше невозможна. В dev-режиме генерим разовый ключ, чтобы
+# приложение поднималось «из коробки», но в prod переменная обязательна.
+_secret_key = os.environ.get('SECRET_KEY')
+if not _secret_key:
+    if os.environ.get('FLASK_ENV') == 'production' or os.environ.get('GUNICORN_MAIN') == '1':
+        raise RuntimeError(
+            "SECRET_KEY environment variable is required in production. "
+            "See .env.example for how to generate one."
+        )
+    _secret_key = secrets.token_hex(32)
+    logger.warning("SECRET_KEY not set — using a random per-process key (dev only).")
+app.secret_key = _secret_key
 app.config['TEMPLATES_AUTO_RELOAD'] = True
 app.config['UPLOAD_FOLDER'] = os.path.join(BASE_DIR, 'static', 'uploads')
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
@@ -21,6 +38,16 @@ os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 # --- ПОДКЛЮЧЕНИЕ К БАЗЕ ДАННЫХ ---
 app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL', 'sqlite:///local.db')
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+
+# A11: connect_timeout в DSN. Без таймаута Flask висит вечно, если БД недоступна
+# (как было на маке при выключенном Docker). Для PostgreSQL также включаем
+# pool_pre_ping, чтобы битые соединения отбрасывались до использования.
+if app.config['SQLALCHEMY_DATABASE_URI'].startswith(('postgresql', 'postgres')):
+    app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
+        'connect_args': {'connect_timeout': 10},
+        'pool_pre_ping': True,
+    }
+
 db = SQLAlchemy(app)
 
 # --- МОДЕЛИ БАЗЫ ДАННЫХ ---
@@ -280,20 +307,87 @@ def login_required(f):
         return f(*args, **kwargs)
     return decorated_function
 
+
+# A1 + B15: единая точка разрешения текущего пользователя и проверки
+# доступности БД. Работает до любого вьюха — в отличие от context_processor,
+# который срабатывал только при render_template, из-за чего POST на чистой
+# сессии отдавал 403 пока не сделан хотя бы один GET (A1).
+@app.before_request
+def _load_request_context():
+    g.current_user = None
+    g.is_admin = False
+    g.is_super_admin = False
+    g.db_available = True
+    g.db_error = None
+
+    try:
+        if 'username' in session:
+            u = User.query.filter_by(username=session['username']).first()
+            if u:
+                g.current_user = u
+                g.is_admin = u.is_admin
+                g.is_super_admin = u.is_super_admin
+                # Кэшируем в сессии для совместимости с уже написанным кодом.
+                session['is_admin'] = g.is_admin
+                session['is_super_admin'] = g.is_super_admin
+            else:
+                # Пользователя больше нет в БД — сбрасываем сессию.
+                session.clear()
+    except OperationalError as e:
+        # B15: БД недоступна. Не роняем запрос — вью покажет баннер.
+        db.session.rollback()
+        g.db_available = False
+        g.db_error = str(e.orig) if e.orig else str(e)
+        logger.warning("DB unavailable: %s", g.db_error)
+    except SQLAlchemyError as e:
+        db.session.rollback()
+        g.db_available = False
+        g.db_error = str(e)
+        logger.warning("DB error in before_request: %s", e)
+
+
 @app.context_processor
 def inject_user():
-    user = None
-    is_admin = False
-    is_super_admin = False
-    if 'username' in session:
-        u = User.query.filter_by(username=session['username']).first()
-        if u:
-            user = u.username
-            is_admin = u.is_admin
-            is_super_admin = u.is_super_admin
-            session['is_admin'] = is_admin
-            session['is_super_admin'] = is_super_admin
-    return {'current_user': user, 'is_admin': is_admin, 'is_super_admin': is_super_admin}
+    # Читаем из g, куда _load_request_context() уже положил все флаги.
+    user = g.current_user
+    return {
+        'current_user': user.username if user else None,
+        'is_admin': bool(getattr(g, 'is_admin', False)),
+        'is_super_admin': bool(getattr(g, 'is_super_admin', False)),
+        'db_available': bool(getattr(g, 'db_available', True)),
+        'db_error': getattr(g, 'db_error', None),
+    }
+
+
+def _forbidden():
+    """Единый ответ 403 — был повторен 20+ раз."""
+    if request.is_json or request.path.startswith('/api/') or request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+        return jsonify({"error": "Отказано"}), 403
+    return "Отказано", 403
+
+
+def admin_required(f):
+    """C3: декоратор вместо повторяющегося `if not session.get('is_admin'): ...`."""
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if 'username' not in session:
+            return redirect(url_for('login'))
+        if not getattr(g, 'is_admin', False):
+            return _forbidden()
+        return f(*args, **kwargs)
+    return decorated_function
+
+
+def super_admin_required(f):
+    """Аналогичный декоратор для роли SuperAdmin."""
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if 'username' not in session:
+            return redirect(url_for('login'))
+        if not getattr(g, 'is_super_admin', False):
+            return _forbidden()
+        return f(*args, **kwargs)
+    return decorated_function
 
 @app.route('/')
 def index():
@@ -309,41 +403,47 @@ def logout():
 @app.route('/dashboard')
 @login_required
 def dashboard_view():
-    sync_workout_statuses()
-    
-    # Пытаемся получить статистику из представления
-    try:
-        res = db.session.execute(text("SELECT * FROM v_dashboard_stats")).fetchone()
-        stats = {
-            'riders': res.riders_count,
-            'horses': res.horses_count,
-            'workouts': res.scheduled_count
-        }
-    except Exception as e:
-        print(f"DEBUG: View v_dashboard_stats failed, using fallback: {e}")
-        stats = {
-            'riders': Rider.query.count(),
-            'horses': Horse.query.count(),
-            'workouts': Workout.query.filter(Workout.status == 'Запланировано').count()
-        }
-        
-    workouts = Workout.query.order_by(Workout.datetime_start.asc()).all()
+    # B15: если БД недоступна — рендерим дашборд с баннером и нулевой сводкой,
+    # вместо 500. db_available уже проставлен в before_request.
+    stats = {'riders': 0, 'horses': 0, 'workouts': 0}
+    workouts = []
+
+    if getattr(g, 'db_available', True):
+        try:
+            sync_workout_statuses()
+            try:
+                res = db.session.execute(text("SELECT * FROM v_dashboard_stats")).fetchone()
+                stats = {
+                    'riders': res.riders_count,
+                    'horses': res.horses_count,
+                    'workouts': res.scheduled_count
+                }
+            except Exception as e:
+                logger.info("View v_dashboard_stats failed, using fallback: %s", e)
+                stats = {
+                    'riders': Rider.query.count(),
+                    'horses': Horse.query.count(),
+                    'workouts': Workout.query.filter(Workout.status == 'Запланировано').count()
+                }
+
+            workouts = Workout.query.order_by(Workout.datetime_start.asc()).all()
+        except (OperationalError, SQLAlchemyError) as e:
+            db.session.rollback()
+            logger.warning("dashboard_view: DB query failed: %s", e)
+            g.db_available = False
+            g.db_error = str(getattr(e, 'orig', e))
+
     return render_template('dashboard.html', stats=stats, workouts=workouts)
 
 @app.route('/admin/users')
-@login_required
+@super_admin_required
 def admin_users():
-    current_u = User.query.filter_by(username=session.get('username')).first()
-    if not current_u or not current_u.is_super_admin: return "Отказано", 403
     users = User.query.all()
     return render_template('admin-users.html', users=users)
 
 @app.route('/make_admin/<target_username>', methods=['POST'])
-@login_required
+@super_admin_required
 def make_admin(target_username):
-    # Check directly from DB for security
-    current_u = User.query.filter_by(username=session.get('username')).first()
-    if not current_u or not current_u.is_super_admin: return "Отказано", 403
     u = User.query.filter_by(username=target_username).first()
     if u:
         admin_role = Role.query.filter_by(role_name='Admin').first()
@@ -353,10 +453,8 @@ def make_admin(target_username):
     return redirect(url_for('admin_users'))
 
 @app.route('/remove_admin/<target_username>', methods=['POST'])
-@login_required
+@super_admin_required
 def remove_admin(target_username):
-    current_u = User.query.filter_by(username=session.get('username')).first()
-    if not current_u or not current_u.is_super_admin: return "Отказано", 403
     u = User.query.filter_by(username=target_username).first()
     if u:
         if u.role and u.role.role_name == 'SuperAdmin': return "Нельзя", 403
@@ -367,10 +465,8 @@ def remove_admin(target_username):
     return redirect(url_for('admin_users'))
 
 @app.route('/admin/delete_user/<int:user_id>', methods=['POST'])
-@login_required
+@super_admin_required
 def delete_user(user_id):
-    current_u = User.query.filter_by(username=session.get('username')).first()
-    if not current_u or not current_u.is_super_admin: return "Отказано", 403
     u = User.query.get_or_404(user_id)
     if u.is_super_admin: return "Нельзя удалить СуперАдмина", 403
     
@@ -392,9 +488,8 @@ def horses_list():
     return render_template('horses-list.html', horses=Horse.query.all())
 
 @app.route('/horses/add', methods=['GET', 'POST'])
-@login_required
+@admin_required
 def horses_add():
-    if not session.get('is_admin'): return "Отказано", 403
     if request.method == 'POST':
         breed_name = request.form.get('breed', 'Неизвестна')
         breed = Breed.query.filter_by(name=breed_name).first() or Breed(name=breed_name)
@@ -421,9 +516,8 @@ def horses_add():
     return render_template('horses.html')
 
 @app.route('/horses/edit/<int:item_id>', methods=['GET', 'POST'])
-@login_required
+@admin_required
 def horses_edit(item_id):
-    if not session.get('is_admin'): return "Отказано", 403
     horse = Horse.query.get_or_404(item_id)
     if request.method == 'POST':
         horse.name = request.form.get('name')
@@ -464,9 +558,8 @@ def horses_edit(item_id):
         return f"Ошибка: {e}", 500
 
 @app.route('/horses/delete/<int:item_id>', methods=['POST'])
-@login_required
+@admin_required
 def horses_delete(item_id):
-    if not session.get('is_admin'): return "Отказано", 403
     horse = Horse.query.get_or_404(item_id)
     db.session.delete(horse); db.session.commit()
     return redirect(url_for('horses_list'))
@@ -478,9 +571,8 @@ def trainers_list():
     return render_template('trainers-list.html', trainers=Trainer.query.all())
 
 @app.route('/trainers/add', methods=['GET', 'POST'])
-@login_required
+@admin_required
 def trainers_add():
-    if not session.get('is_admin'): return "Отказано", 403
     if request.method == 'POST':
         spec_name = request.form.get('specialization', 'Общая')
         spec = Specialization.query.filter_by(name=spec_name).first() or Specialization(name=spec_name)
@@ -496,9 +588,8 @@ def trainers_add():
     return render_template('trainers.html')
 
 @app.route('/trainers/edit/<int:item_id>', methods=['GET', 'POST'])
-@login_required
+@admin_required
 def trainers_edit(item_id):
-    if not session.get('is_admin'): return "Отказано", 403
     trainer = Trainer.query.get_or_404(item_id)
     if request.method == 'POST':
         trainer.name = request.form.get('name')
@@ -533,9 +624,8 @@ def trainers_edit(item_id):
         return f"Ошибка: {e}", 500
 
 @app.route('/trainers/delete/<int:item_id>', methods=['POST'])
-@login_required
+@admin_required
 def trainers_delete(item_id):
-    if not session.get('is_admin'): return "Отказано", 403
     trainer = Trainer.query.get_or_404(item_id)
     db.session.delete(trainer); db.session.commit()
     return redirect(url_for('trainers_list'))
@@ -547,9 +637,8 @@ def riders_list():
     return render_template('riders-list.html', riders=Rider.query.all())
 
 @app.route('/riders/add', methods=['GET', 'POST'])
-@login_required
+@admin_required
 def riders_add():
-    if not session.get('is_admin'): return "Отказано", 403
     if request.method == 'POST':
         photo = request.files.get('photo')
         photo_name = ''
@@ -575,9 +664,8 @@ def riders_add():
     return render_template('riders.html')
 
 @app.route('/riders/edit/<int:item_id>', methods=['GET', 'POST'])
-@login_required
+@admin_required
 def riders_edit(item_id):
-    if not session.get('is_admin'): return "Отказано", 403
     rider = Rider.query.get_or_404(item_id)
     if request.method == 'POST':
         rider.name = request.form.get('name')
@@ -616,9 +704,8 @@ def riders_edit(item_id):
         return f"Ошибка: {e}", 500
 
 @app.route('/riders/<int:item_id>/subscription', methods=['POST'])
-@login_required
+@admin_required
 def rider_add_subscription(item_id):
-    if not session.get('is_admin'): return "Отказано", 403
     
     amount_str = request.form.get('amount', '0')
     amount = int(amount_str) if amount_str and amount_str.strip() else 0
@@ -634,9 +721,8 @@ def rider_add_subscription(item_id):
     return redirect(url_for('riders_list'))
 
 @app.route('/riders/<int:item_id>/adjust_balance', methods=['POST'])
-@login_required
+@admin_required
 def rider_adjust_balance(item_id):
-    if not session.get('is_admin'): return jsonify({"error": "Отказано"}), 403
     
     b_type = request.form.get('type') # 'sub' or 'rental'
     delta = int(request.form.get('delta', 0))
@@ -663,9 +749,8 @@ def services_list():
     return render_template('services-list.html', services=Service.query.all())
 
 @app.route('/services/add', methods=['GET', 'POST'])
-@login_required
+@admin_required
 def services_add():
-    if not session.get('is_admin'): return "Отказано", 403
     if request.method == 'POST':
         s = Service(
             name=request.form.get('name'), 
@@ -680,9 +765,8 @@ def services_add():
     return render_template('services.html')
 
 @app.route('/services/edit/<int:item_id>', methods=['GET', 'POST'])
-@login_required
+@admin_required
 def services_edit(item_id):
-    if not session.get('is_admin'): return "Отказано", 403
     service = Service.query.get_or_404(item_id)
     if request.method == 'POST':
         service.name = request.form.get('name')
@@ -712,9 +796,8 @@ def services_edit(item_id):
         return f"Ошибка: {e}", 500
 
 @app.route('/services/delete/<int:item_id>', methods=['POST'])
-@login_required
+@admin_required
 def services_delete(item_id):
-    if not session.get('is_admin'): return "Отказано", 403
     service = Service.query.get_or_404(item_id)
     db.session.delete(service); db.session.commit()
     return redirect(url_for('services_list'))
@@ -740,112 +823,218 @@ def workouts_list():
     return render_template('workouts-list.html', workouts=workouts, current_date=effective_date, show_all=show_all)
 
 
-@app.route('/workouts/add', methods=['GET', 'POST'])
-@login_required
-def workouts_add():
-    if not session.get('is_admin'): return "Отказано", 403
-    if request.method == 'POST':
-        dt = datetime.strptime(f"{request.form.get('date')} {request.form.get('time')}", '%Y-%m-%d %H:%M')
-        w = Workout(
-            datetime_start=dt, 
-            idtrainer=int(request.form.get('trainer')) if request.form.get('trainer') else None, 
-            idservice=int(request.form.get('service')) if request.form.get('service') else None, 
-            status=request.form.get('status', 'Запланировано'), 
-            notes=request.form.get('notes', '')
-        )
-        db.session.add(w)
-        db.session.flush() # Получаем ID тренировки
-        
-        # Обработка участников
-        p_riders = request.form.getlist('p_rider[]')
-        p_guests = request.form.getlist('p_guest[]')
-        p_horses = request.form.getlist('p_horse[]')
-        
-        for i in range(len(p_riders)):
-            p = WorkoutParticipant(idworkout=w.id)
-            if p_riders[i] == 'guest':
-                p.guest_name = p_guests[i] if i < len(p_guests) else "Гость"
-            else:
-                p.idrider = int(p_riders[i]) if p_riders[i] else None
-            
-            p.idhorse = int(p_horses[i]) if i < len(p_horses) and p_horses[i] else None
-            db.session.add(p)
-            
-        # Если статус сразу "Завершено", списание произойдет автоматически через триггер БД
-            
-        db.session.commit()
-        return redirect(url_for('workouts_list'))
-    
-    # Defaults in MSK (UTC+3)
-    now_msk = datetime.utcnow() + timedelta(hours=3)
-    default_date = now_msk.strftime('%Y-%m-%d')
-    default_time = now_msk.strftime('%H:%M')
+def _participants_from_form():
+    """Собирает список участников из request.form в формате,
+    который понимает шаблон dashboard-add.html (тот же формат, что и при edit)."""
+    p_riders = request.form.getlist('p_rider[]')
+    p_guests = request.form.getlist('p_guest[]')
+    p_horses = request.form.getlist('p_horse[]')
+    out = []
+    for i in range(len(p_riders)):
+        out.append({
+            'rider_id': p_riders[i] if p_riders[i] else '',
+            'guest_name': p_guests[i] if i < len(p_guests) else '',
+            'horse_id': p_horses[i] if i < len(p_horses) else '',
+        })
+    return out
 
-    return render_template('dashboard-add.html', 
-                          trainers=Trainer.query.all(), 
-                          riders=Rider.query.all(), 
-                          horses=Horse.query.all(), 
-                          services=Service.query.all(),
-                          default_date=default_date,
-                          default_time=default_time)
+
+def _render_workouts_form(error=None, form_data=None, participants=None,
+                          default_date=None, default_time=None):
+    """A2: единая отрисовка формы тренировки с возможностью предзаполнения
+    данными, которые админ уже ввёл (чтобы не терять их при ошибке валидации)."""
+    if default_date is None or default_time is None:
+        now_msk = get_msk_now()
+        default_date = default_date or now_msk.strftime('%Y-%m-%d')
+        default_time = default_time or now_msk.strftime('%H:%M')
+    return render_template(
+        'dashboard-add.html',
+        trainers=Trainer.query.all(),
+        riders=Rider.query.all(),
+        horses=Horse.query.all(),
+        services=Service.query.all(),
+        default_date=default_date,
+        default_time=default_time,
+        form_data=form_data,
+        participants_json=json.dumps(participants) if participants is not None else None,
+        error=error,
+    )
+
+
+@app.route('/workouts/add', methods=['GET', 'POST'])
+@admin_required
+def workouts_add():
+    if request.method == 'POST':
+        date_str = (request.form.get('date') or '').strip()
+        time_str = (request.form.get('time') or '').strip()
+        service_str = (request.form.get('service') or '').strip()
+
+        # A2: ручная валидация с понятными сообщениями вместо 500 на пустых/битых полях.
+        errors = []
+        if not date_str:
+            errors.append("Укажите дату тренировки.")
+        if not time_str:
+            errors.append("Укажите время начала.")
+        if not service_str:
+            errors.append("Выберите тип услуги.")
+
+        dt = None
+        if date_str and time_str:
+            try:
+                dt = datetime.strptime(f"{date_str} {time_str}", '%Y-%m-%d %H:%M')
+            except ValueError:
+                errors.append("Неверный формат даты или времени.")
+
+        if errors:
+            return _render_workouts_form(
+                error=" ".join(errors),
+                form_data=request.form,
+                participants=_participants_from_form(),
+                default_date=date_str or None,
+                default_time=time_str or None,
+            )
+
+        try:
+            w = Workout(
+                datetime_start=dt,
+                idtrainer=int(request.form.get('trainer')) if request.form.get('trainer') else None,
+                idservice=int(service_str) if service_str else None,
+                status=request.form.get('status', 'Запланировано'),
+                notes=request.form.get('notes', '')
+            )
+            db.session.add(w)
+            db.session.flush()  # Получаем ID тренировки
+
+            # Обработка участников
+            p_riders = request.form.getlist('p_rider[]')
+            p_guests = request.form.getlist('p_guest[]')
+            p_horses = request.form.getlist('p_horse[]')
+
+            for i in range(len(p_riders)):
+                p = WorkoutParticipant(idworkout=w.id)
+                if p_riders[i] == 'guest':
+                    p.guest_name = p_guests[i] if i < len(p_guests) else "Гость"
+                else:
+                    p.idrider = int(p_riders[i]) if p_riders[i] else None
+
+                p.idhorse = int(p_horses[i]) if i < len(p_horses) and p_horses[i] else None
+                db.session.add(p)
+
+            # Если статус сразу "Завершено", списание произойдет автоматически через триггер БД
+            db.session.commit()
+        except (ValueError, SQLAlchemyError) as e:
+            db.session.rollback()
+            logger.warning("workouts_add failed: %s", e)
+            return _render_workouts_form(
+                error=f"Не удалось сохранить тренировку: {e}",
+                form_data=request.form,
+                participants=_participants_from_form(),
+                default_date=date_str or None,
+                default_time=time_str or None,
+            )
+
+        return redirect(url_for('workouts_list'))
+
+    return _render_workouts_form()
 
 @app.route('/workouts/edit/<int:item_id>', methods=['GET', 'POST'])
-@login_required
+@admin_required
 def workouts_edit(item_id):
-    if not session.get('is_admin'): return "Отказано", 403
     w = Workout.query.get_or_404(item_id)
+
+    def _render_edit_form(error=None, participants=None):
+        # A2: сохраняем введённые данные при ошибке валидации (для edit).
+        if participants is None:
+            participants = []
+            for p in w.participants:
+                participants.append({
+                    'rider_id': p.idrider if p.idrider else 'guest',
+                    'guest_name': p.guest_name or '',
+                    'horse_id': p.idhorse or ''
+                })
+        return render_template(
+            'dashboard-add.html',
+            item=w,
+            participants_json=json.dumps(participants),
+            trainers=Trainer.query.all(),
+            riders=Rider.query.all(),
+            horses=Horse.query.all(),
+            services=Service.query.all(),
+            form_data=request.form if request.method == 'POST' else None,
+            error=error,
+        )
+
     if request.method == 'POST':
-        old_status = w.status
-        w.datetime_start = datetime.strptime(f"{request.form.get('date')} {request.form.get('time')}", '%Y-%m-%d %H:%M')
-        w.idtrainer = int(request.form.get('trainer')) if request.form.get('trainer') else None
-        w.idservice = int(request.form.get('service')) if request.form.get('service') else None
-        w.status = request.form.get('status')
-        w.notes = request.form.get('notes')
-        
-        # Если статус изменился на "Завершено", списание произойдет автоматически через триггер БД
-        
-        # Обновление участников
-        WorkoutParticipant.query.filter_by(idworkout=w.id).delete()
-        p_riders = request.form.getlist('p_rider[]')
-        p_guests = request.form.getlist('p_guest[]')
-        p_horses = request.form.getlist('p_horse[]')
-        
-        for i in range(len(p_riders)):
-            p = WorkoutParticipant(idworkout=w.id)
-            if p_riders[i] == 'guest':
-                p.guest_name = p_guests[i] if i < len(p_guests) else "Гость"
-            else:
-                p.idrider = int(p_riders[i]) if p_riders[i] else None
-            
-            p.idhorse = int(p_horses[i]) if i < len(p_horses) and p_horses[i] else None
-            db.session.add(p)
-            
-        db.session.commit()
-        db.session.commit()
+        date_str = (request.form.get('date') or '').strip()
+        time_str = (request.form.get('time') or '').strip()
+
+        # A2: валидация с сохранением введённых данных вместо 500.
+        errors = []
+        if not date_str:
+            errors.append("Укажите дату тренировки.")
+        if not time_str:
+            errors.append("Укажите время начала.")
+
+        new_dt = None
+        if date_str and time_str:
+            try:
+                new_dt = datetime.strptime(f"{date_str} {time_str}", '%Y-%m-%d %H:%M')
+            except ValueError:
+                errors.append("Неверный формат даты или времени.")
+
+        if errors:
+            return _render_edit_form(
+                error=" ".join(errors),
+                participants=_participants_from_form(),
+            )
+
+        try:
+            w.datetime_start = new_dt
+            w.idtrainer = int(request.form.get('trainer')) if request.form.get('trainer') else None
+            w.idservice = int(request.form.get('service')) if request.form.get('service') else None
+            w.status = request.form.get('status')
+            w.notes = request.form.get('notes')
+
+            # Если статус изменился на "Завершено", списание произойдет автоматически через триггер БД
+
+            # Обновление участников
+            WorkoutParticipant.query.filter_by(idworkout=w.id).delete()
+            p_riders = request.form.getlist('p_rider[]')
+            p_guests = request.form.getlist('p_guest[]')
+            p_horses = request.form.getlist('p_horse[]')
+
+            for i in range(len(p_riders)):
+                p = WorkoutParticipant(idworkout=w.id)
+                if p_riders[i] == 'guest':
+                    p.guest_name = p_guests[i] if i < len(p_guests) else "Гость"
+                else:
+                    p.idrider = int(p_riders[i]) if p_riders[i] else None
+
+                p.idhorse = int(p_horses[i]) if i < len(p_horses) and p_horses[i] else None
+                db.session.add(p)
+
+            db.session.commit()
+        except (ValueError, SQLAlchemyError) as e:
+            db.session.rollback()
+            logger.warning("workouts_edit failed: %s", e)
+            return _render_edit_form(
+                error=f"Не удалось сохранить тренировку: {e}",
+                participants=_participants_from_form(),
+            )
         return redirect(url_for('workouts_list'))
-    
-    # Подготовка данных для редактирования (JSON для JS)
-    p_data = []
-    for p in w.participants:
-        p_data.append({
-            'rider_id': p.idrider if p.idrider else 'guest',
-            'guest_name': p.guest_name or '',
-            'horse_id': p.idhorse or ''
-        })
-    return render_template('dashboard-add.html', item=w, participants_json=json.dumps(p_data), trainers=Trainer.query.all(), riders=Rider.query.all(), horses=Horse.query.all(), services=Service.query.all())
+
+    return _render_edit_form()
 
 @app.route('/workouts/delete/<int:item_id>', methods=['POST'])
-@login_required
+@admin_required
 def workouts_delete(item_id):
-    if not session.get('is_admin'): return "Отказано", 403
     w = Workout.query.get_or_404(item_id)
     db.session.delete(w); db.session.commit()
     return redirect(url_for('workouts_list'))
 
 @app.route('/workouts/<int:item_id>/status', methods=['POST'])
-@login_required
+@admin_required
 def workouts_update_status(item_id):
-    if not session.get('is_admin'): return "Отказано", 403
     w = Workout.query.get_or_404(item_id)
     old_status = w.status
     w.status = request.form.get('status')
