@@ -220,6 +220,16 @@
     </script>
     <main class="main-content">
 
+    {% if not db_available %}
+    <div role="alert" style="background:#FDECEC; color:#8A1F1F; border:1px solid #F5B5B5; border-radius:14px; padding:16px 20px; margin-bottom:24px; display:flex; align-items:center; gap:12px;">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="13"/><line x1="12" y1="16.5" x2="12.01" y2="16.5"/></svg>
+        <div>
+            <div style="font-weight:800; margin-bottom:2px;">Нет связи с базой данных</div>
+            <div style="font-size:13px; opacity:0.85;">Цифры на сводке могут быть нулевыми не потому, что данных нет, а потому что приложение сейчас не может прочитать БД. Проверьте сервер PostgreSQL и переменную <code>DATABASE_URL</code>.</div>
+        </div>
+    </div>
+    {% endif %}
+
     <div class="header">
         <h2 class="page-title" style="font-size:24px;">Ближайшие занятия</h2>
         {% if is_admin %}<button class="btn-primary" onclick="window.location.href='/workouts/add'">+ Добавить</button>{% endif %}

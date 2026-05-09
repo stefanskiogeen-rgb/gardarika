@@ -220,33 +220,43 @@
     </script>
     <main class="main-content">
 {% set item = item | default(None) %}
+{% set form_data = form_data | default(None) %}
+{% set fd_date = form_data.date if form_data else '' %}
+{% set fd_time = form_data.time if form_data else '' %}
+{% set fd_trainer = form_data.trainer if form_data else '' %}
+{% set fd_service = form_data.service if form_data else '' %}
 <div class="header">
     <h1 class="page-title">{{'Изменить тренировку' if item else 'Новая тренировка'}}</h1>
     <button class="btn-secondary" onclick="window.location.href='/workouts'">Назад к календарю</button>
 </div>
 <div class="card" style="max-width:1000px; margin: 0 auto;">
+    {% if error %}
+    <div style="background:#FDECEC; color:var(--danger); border:1px solid #F5B5B5; border-radius:var(--radius-md); padding:14px 18px; margin-bottom:24px; font-weight:600;">
+        {{ error }}
+    </div>
+    {% endif %}
     <form action="{{ url_for('workouts_edit', item_id=item.id) if item else url_for('workouts_add') }}" method="POST">
         <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:24px; margin-bottom:32px;">
             <div class="form-group">
                 <label class="form-label">Дата проведения</label>
-                <input type="date" name="date" class="form-input" value="{{item.datetime_start.strftime('%Y-%m-%d') if item else default_date}}" required>
+                <input type="date" name="date" class="form-input" value="{{ item.datetime_start.strftime('%Y-%m-%d') if item else (fd_date or default_date) }}" required>
             </div>
             <div class="form-group">
                 <label class="form-label">Время начала</label>
-                <input type="time" name="time" class="form-input" value="{{item.datetime_start.strftime('%H:%M') if item else default_time}}" required>
+                <input type="time" name="time" class="form-input" value="{{ item.datetime_start.strftime('%H:%M') if item else (fd_time or default_time) }}" required>
             </div>
             <div class="form-group">
                 <label class="form-label">Назначить тренера</label>
                 <select name="trainer" class="form-input">
                     <option value="">Любой свободный</option>
-                    {% for t in trainers %}<option value="{{t.id}}" {{'selected' if item and item.idtrainer == t.id}}>{{t.name}} {{t.lastname|default('', true)}}</option>{% endfor %}
+                    {% for t in trainers %}<option value="{{t.id}}" {{'selected' if (item and item.idtrainer == t.id) or (fd_trainer and fd_trainer|string == t.id|string)}}>{{t.name}} {{t.lastname|default('', true)}}</option>{% endfor %}
                 </select>
             </div>
             <div class="form-group">
                 <label class="form-label">Тип услуги</label>
                 <select name="service" class="form-input" required>
                     <option value="">Выберите из списка</option>
-                    {% for s in services %}<option value="{{s.id}}" {{'selected' if item and item.idservice == s.id}}>{{s.name}}</option>{% endfor %}
+                    {% for s in services %}<option value="{{s.id}}" {{'selected' if (item and item.idservice == s.id) or (fd_service and fd_service|string == s.id|string)}}>{{s.name}}</option>{% endfor %}
                 </select>
             </div>
         </div>
@@ -269,7 +279,7 @@
 <script>
     const riders=[{% for r in riders %}{id:{{r.id}},name:'{{r.name}}'},{% endfor %}];
     const horses=[{% for h in horses %}{id:{{h.id}},name:'{{h.name}}'},{% endfor %}];
-    const initialData={{participants_json|safe if item else '[]'}};
+    const initialData={{ participants_json|safe if participants_json else '[]' }};
 
     function addParticipant(data=null){
         const container=document.getElementById('participants-list');
