@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Gardarika | Отчёт по выручке</title>
+    <link rel="icon" type="image/png" href="{{ url_for('static', filename='img/favicon.png') }}">
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --primary: #1B3022; --primary-light: #2C4A3B; --accent: #C5A059;
+            --bg-main: #FBF9F7; --surface: #FFFFFF; --text-main: #1A1A1A;
+            --text-muted: #7A7A7A; --border: #E8E5DF; --danger: #D72C2C;
+            --success: #1E7D32; --info: #2C7BE5; --shadow: 0 12px 30px rgba(27,48,34,0.06);
+            --radius-lg: 24px; --radius-md: 12px;
+        }
+        * { margin:0; padding:0; box-sizing:border-box; font-family:'Outfit',sans-serif; }
+        body { background:var(--bg-main); color:var(--text-main); display:flex; height:100vh; overflow:hidden; }
+        a { text-decoration:none; color:inherit; transition:0.3s; }
+
+        .sidebar { width:260px; background:var(--surface); border-right:1px solid var(--border); display:flex; flex-direction:column; padding:32px 24px; flex-shrink:0; }
+        .logo { display:flex; align-items:center; gap:12px; cursor:pointer; }
+        .sidebar .logo { margin-bottom:40px; }
+        .logo:hover { opacity:0.8; }
+        .logo img { width:36px; height:36px; border-radius:10px; }
+        .logo span { font-size:16px; font-weight:800; color:var(--primary); text-transform:uppercase; letter-spacing:1px; }
+
+        .nav-menu { display:flex; flex-direction:column; gap:8px; flex:1; }
+        .nav-item { display:flex; align-items:center; padding:12px 16px; border-radius:var(--radius-md); font-size:14px; font-weight:600; color:var(--text-muted); }
+        .nav-item:hover { background:rgba(27,48,34,0.04); color:var(--primary); }
+        .nav-item.active { background:var(--primary); color:white; box-shadow:0 8px 24px rgba(27,48,34,0.18); }
+
+        .main-content { flex:1; padding:48px; overflow-y:auto; -webkit-overflow-scrolling: touch; }
+        .header { display:flex; justify-content:space-between; align-items:center; margin-bottom:36px; gap:16px; flex-wrap: wrap; }
+        .page-title { font-size:32px; font-weight:800; color:var(--primary); letter-spacing:-0.5px; }
+
+        .card { background:var(--surface); border-radius:var(--radius-lg); padding:32px; border:1px solid var(--border); box-shadow:var(--shadow); margin-bottom:24px; }
+        .table-wrap { background:var(--surface); border-radius:var(--radius-lg); border:1px solid var(--border); overflow-x:auto; }
+        table { width:100%; border-collapse:collapse; min-width: 650px; }
+        th { text-align:left; padding:18px 24px; font-size:11px; font-weight:800; color:var(--text-muted); text-transform:uppercase; background:#FAFAFA; border-bottom:1px solid var(--border); letter-spacing:1px; }
+        td { padding:18px 24px; border-bottom:1px solid var(--border); font-size:14px; vertical-align:middle; line-height:1.5; }
+        tfoot td { background:#FAFAFA; font-weight:800; color:var(--primary); border-bottom:none; }
+
+        .form-input { width:100%; padding:14px 16px; border:1px solid var(--border); border-radius:var(--radius-md); font-size:14px; background:var(--surface); color:var(--text-main); }
+        .form-input:focus { outline:none; border-color:var(--primary); }
+        label { display:block; font-size:11px; font-weight:800; color:var(--text-muted); text-transform:uppercase; margin-bottom:8px; letter-spacing: 0.8px; }
+
+        .btn-primary { background:var(--primary); color:white; padding:14px 28px; border-radius:var(--radius-md); border:none; cursor:pointer; font-weight:700; font-size:14px; transition:0.3s cubic-bezier(0.4, 0, 0.2, 1); text-decoration:none; display:inline-flex; align-items:center; gap:8px; }
+        .btn-primary:hover { transform:translateY(-2px); box-shadow:0 12px 24px rgba(27,48,34,0.2); }
+        .btn-secondary { background:var(--surface); color:var(--primary); border:1px solid var(--border); padding:14px 28px; border-radius:var(--radius-md); cursor:pointer; font-weight:700; font-size:14px; transition:0.3s; text-decoration:none; display:inline-flex; align-items:center; gap:8px; }
+        .btn-secondary:hover { background:var(--bg-main); border-color:var(--primary); }
+
+        .filter-grid { display:grid; grid-template-columns: 1fr 1fr auto auto; gap:16px; align-items:end; }
+        .stat-grid { display:grid; grid-template-columns: repeat(3, 1fr); gap:24px; margin-bottom:24px; }
+        .stat-card { background:var(--surface); border-radius:var(--radius-lg); border:1px solid var(--border); padding:24px; box-shadow:var(--shadow); }
+        .stat-label { font-size:11px; font-weight:800; color:var(--text-muted); text-transform:uppercase; letter-spacing:1px; margin-bottom:8px; }
+        .stat-value { font-size:28px; font-weight:800; color:var(--primary); }
+
+        .badge { padding:8px 14px; border-radius:999px; font-size:11px; font-weight:800; text-transform:uppercase; letter-spacing:0.6px; display:inline-flex; align-items:center; }
+        .badge-individual { background:#E7F0FD; color:#2C7BE5; }
+        .badge-group { background:#E6F4EA; color:#1E7D32; }
+        .badge-therapy { background:#FBEFD9; color:#9F8430; }
+        .badge-rental { background:#F3F4F6; color:#7A7A7A; }
+        .badge-other { background:#F3F4F6; color:#7A7A7A; }
+
+        .empty { padding:48px; text-align:center; color:var(--text-muted); font-size:14px; }
+
+        .mobile-header, .mobile-nav, .menu-drawer { display:none; }
+        @media (max-width:768px) {
+            body { flex-direction:column; height:auto; overflow:visible; }
+            .sidebar { display:none; }
+            .main-content { padding:32px 20px 100px; overflow:visible; height:auto; }
+            .header { flex-direction:column; align-items:flex-start; gap:16px; margin-bottom:32px; }
+            .page-title { font-size:26px; }
+            .filter-grid { grid-template-columns: 1fr; }
+            .stat-grid { grid-template-columns: 1fr; gap:12px; }
+        }
+    </style>
+</head>
+<body>
+    <aside class="sidebar">
+        <div class="logo"><img src="/static/img/logo.png"><span>Gardarika</span></div>
+        <nav class="nav-menu">
+            <a href="/dashboard" class="nav-item">📊 Дашборд</a>
+            <a href="/workouts" class="nav-item">🏇 Тренировки</a>
+            <a href="/riders" class="nav-item">👤 Всадники</a>
+            <a href="/horses" class="nav-item">🐎 Лошади</a>
+            <a href="/trainers" class="nav-item">🎓 Тренеры</a>
+            <a href="/services" class="nav-item">💰 Услуги</a>
+            <a href="/reports/revenue" class="nav-item active">📈 Отчёт по выручке</a>
+            {% if is_super_admin %}
+            <a href="/admin/users" class="nav-item">⚙️ Админ-панель</a>
+            {% endif %}
+        </nav>
+    </aside>
+
+    <main class="main-content">
+
+    <div class="header">
+        <h1 class="page-title">Отчёт по выручке клуба</h1>
+        <a href="/reports/revenue.pdf?start={{ start_date }}&end={{ end_date }}" class="btn-primary">⬇ Скачать PDF</a>
+    </div>
+
+    <div class="card">
+        <form method="GET" action="/reports/revenue">
+            <div class="filter-grid">
+                <div>
+                    <label>Дата начала</label>
+                    <input type="date" name="start" class="form-input" value="{{ start_date }}" required>
+                </div>
+                <div>
+                    <label>Дата окончания</label>
+                    <input type="date" name="end" class="form-input" value="{{ end_date }}" required>
+                </div>
+                <button type="submit" class="btn-primary">Сформировать</button>
+                <a href="/reports/revenue" class="btn-secondary">Сброс</a>
+            </div>
+        </form>
+    </div>
+
+    <div class="stat-grid">
+        <div class="stat-card">
+            <div class="stat-label">Завершённые тренировки</div>
+            <div class="stat-value">{{ total_workouts }}</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">Выручка за период</div>
+            <div class="stat-value">{{ "{:,.0f}".format(total_revenue).replace(",", " ") }} ₽</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">Средний чек</div>
+            <div class="stat-value">{{ "{:,.0f}".format(avg_check).replace(",", " ") }} ₽</div>
+        </div>
+    </div>
+
+    <div class="table-wrap">
+        <table>
+            <thead>
+                <tr>
+                    <th>Тип услуги</th>
+                    <th>Услуга</th>
+                    <th>Цена</th>
+                    <th>Тренировок</th>
+                    <th>Выручка</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for r in rows %}
+                <tr>
+                    <td>
+                        {% set t = (r.service_type or '')|lower %}
+                        {% if 'индивид' in t %}<span class="badge badge-individual">Индивидуальные</span>
+                        {% elif 'группов' in t %}<span class="badge badge-group">Групповые</span>
+                        {% elif 'иппо' in t or 'тералеч' in t or 'терапи' in t %}<span class="badge badge-therapy">Иппотерапия</span>
+                        {% elif 'прокат' in t %}<span class="badge badge-rental">Прокат</span>
+                        {% else %}<span class="badge badge-other">{{ r.service_type or '—' }}</span>
+                        {% endif %}
+                    </td>
+                    <td><b>{{ r.service_name }}</b></td>
+                    <td>{{ "{:,.0f}".format(r.price).replace(",", " ") }} ₽</td>
+                    <td>{{ r.workouts_count }}</td>
+                    <td><b style="color:var(--primary)">{{ "{:,.0f}".format(r.revenue).replace(",", " ") }} ₽</b></td>
+                </tr>
+                {% else %}
+                <tr><td colspan="5" class="empty">За выбранный период завершённых тренировок не найдено.</td></tr>
+                {% endfor %}
+            </tbody>
+            {% if rows %}
+            <tfoot>
+                <tr>
+                    <td colspan="3" style="text-align:right">ИТОГО:</td>
+                    <td>{{ total_workouts }}</td>
+                    <td>{{ "{:,.0f}".format(total_revenue).replace(",", " ") }} ₽</td>
+                </tr>
+            </tfoot>
+            {% endif %}
+        </table>
+    </div>
+
+    </main>
+</body>
+</html>

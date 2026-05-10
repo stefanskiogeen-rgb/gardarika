@@ -113,6 +113,7 @@
             <a href="/horses" class="nav-item {{'active' if 'horses' in request.path}}">🐎 Лошади</a>
             <a href="/trainers" class="nav-item {{'active' if 'trainers' in request.path}}">🎓 Тренеры</a>
             <a href="/services" class="nav-item {{'active' if 'services' in request.path}}">💰 Услуги</a>
+            <a href="/reports/revenue" class="nav-item {{'active' if 'reports/revenue' in request.path}}">📈 Отчёт по выручке</a>
             {% if is_super_admin %}
             <a href="/admin/users" class="nav-item {{'active' if 'admin/users' in request.path}}">⚙️ Админ-панель</a>
             {% endif %}

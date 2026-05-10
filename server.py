@@ -6,9 +6,10 @@ import logging
 from datetime import datetime, timedelta
 from functools import wraps
 from werkzeug.security import generate_password_hash, check_password_hash
-from flask import Flask, request, redirect, url_for, session, render_template, jsonify, render_template_string
+from flask import Flask, request, redirect, url_for, session, render_template, jsonify, render_template_string, send_file
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import text, func
+from io import BytesIO
 
 # Инициализация Flask
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -888,6 +889,253 @@ def register():
         session['username'] = username
         return redirect(url_for('dashboard_view'))
     return render_template_string(f"<!DOCTYPE html><html><head>{CSS_STYLE}</head><body><div class='auth-container'><div class='logo'><img src='/static/img/logo.png' alt='Logo'><span>Гардарика</span></div><h1 class='auth-title'>Регистрация</h1><form method='POST'><div class='form-group'><label>Логин</label><input type='text' name='username' required></div><div class='form-group'><label>Пароль</label><input type='password' name='password' required></div><button type='submit' class='btn-primary'>Зарегистрироваться</button></form><div style='text-align:center;margin-top:20px;'><a href='/login' style='color:var(--primary);text-decoration:none;font-size:14px;'>Уже есть аккаунт? Войти</a></div></div></body></html>")
+
+# --- ОТЧЁТ ПО ВЫРУЧКЕ КЛУБА (HTML + PDF) ---
+
+def _parse_report_dates():
+    """Возвращает (start_date, end_date) в формате 'YYYY-MM-DD'.
+    По умолчанию — текущий месяц по московскому времени."""
+    today = get_msk_now().date()
+    default_start = today.replace(day=1)
+    default_end = today
+
+    def _safe(value, fallback):
+        if not value:
+            return fallback
+        try:
+            return datetime.strptime(value, '%Y-%m-%d').date()
+        except ValueError:
+            return fallback
+
+    start = _safe(request.args.get('start'), default_start)
+    end = _safe(request.args.get('end'), default_end)
+    if end < start:
+        start, end = end, start
+    return start, end
+
+
+def _query_revenue(start, end):
+    """Возвращает агрегированную выручку по услугам за период [start; end]."""
+    sql = text("""
+        SELECT
+            COALESCE(s.type, '')        AS service_type,
+            COALESCE(s.name, '—')       AS service_name,
+            COALESCE(s.price, 0)        AS price,
+            COUNT(w.id)                 AS workouts_count,
+            COUNT(w.id) * COALESCE(s.price, 0) AS revenue
+        FROM workouts w
+        LEFT JOIN services s ON s.id = w.idservice
+        WHERE w.status = 'Завершено'
+          AND w.datetime_start >= :d_start
+          AND w.datetime_start <  :d_end_excl
+        GROUP BY s.type, s.name, s.price
+        ORDER BY revenue DESC, service_name ASC
+    """)
+    rows = db.session.execute(sql, {
+        'd_start': datetime.combine(start, datetime.min.time()),
+        'd_end_excl': datetime.combine(end + timedelta(days=1), datetime.min.time()),
+    }).fetchall()
+
+    rows_dicts = [{
+        'service_type': r.service_type,
+        'service_name': r.service_name,
+        'price': float(r.price or 0),
+        'workouts_count': int(r.workouts_count or 0),
+        'revenue': float(r.revenue or 0),
+    } for r in rows]
+    total_workouts = sum(r['workouts_count'] for r in rows_dicts)
+    total_revenue = sum(r['revenue'] for r in rows_dicts)
+    avg_check = (total_revenue / total_workouts) if total_workouts else 0
+    return rows_dicts, total_workouts, total_revenue, avg_check
+
+
+@app.route('/reports/revenue')
+@login_required
+def revenue_report_view():
+    sync_workout_statuses()
+    start, end = _parse_report_dates()
+    rows, total_workouts, total_revenue, avg_check = _query_revenue(start, end)
+    return render_template(
+        'revenue.html',
+        rows=rows,
+        total_workouts=total_workouts,
+        total_revenue=total_revenue,
+        avg_check=avg_check,
+        start_date=start.strftime('%Y-%m-%d'),
+        end_date=end.strftime('%Y-%m-%d'),
+    )
+
+
+def _build_revenue_pdf(start, end, rows, total_workouts, total_revenue, avg_check):
+    """Формирует PDF-отчёт по выручке клуба."""
+    from reportlab.lib import colors
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.lib.units import mm
+    from reportlab.pdfbase import pdfmetrics
+    from reportlab.pdfbase.ttfonts import TTFont
+    from reportlab.platypus import (SimpleDocTemplate, Table, TableStyle,
+                                    Paragraph, Spacer)
+
+    # Регистрируем кириллический шрифт (DejaVu — есть в большинстве Linux-дистрибутивов).
+    font_dir = '/usr/share/fonts/truetype/dejavu'
+    candidates = [
+        (font_dir + '/DejaVuSans.ttf', font_dir + '/DejaVuSans-Bold.ttf'),
+        ('/Library/Fonts/Arial Unicode.ttf', '/Library/Fonts/Arial Unicode.ttf'),
+    ]
+    font_regular = 'Helvetica'
+    font_bold = 'Helvetica-Bold'
+    for reg, bold in candidates:
+        if os.path.exists(reg) and os.path.exists(bold):
+            try:
+                pdfmetrics.registerFont(TTFont('AppSans', reg))
+                pdfmetrics.registerFont(TTFont('AppSans-Bold', bold))
+                font_regular = 'AppSans'
+                font_bold = 'AppSans-Bold'
+                break
+            except Exception as e:
+                print(f"DEBUG: PDF font register failed: {e}")
+
+    buf = BytesIO()
+    doc = SimpleDocTemplate(
+        buf, pagesize=A4,
+        leftMargin=20 * mm, rightMargin=15 * mm,
+        topMargin=18 * mm, bottomMargin=18 * mm,
+        title='Отчёт по выручке клуба «Гардарика»',
+        author='ИС Gardarika',
+    )
+    styles = getSampleStyleSheet()
+    title_style = ParagraphStyle(
+        'Title', parent=styles['Title'],
+        fontName=font_bold, fontSize=18, alignment=1,
+        textColor=colors.HexColor('#1B3022'), spaceAfter=6,
+    )
+    subtitle_style = ParagraphStyle(
+        'Subtitle', parent=styles['Normal'],
+        fontName=font_regular, fontSize=11, alignment=1,
+        textColor=colors.HexColor('#7A7A7A'), spaceAfter=4,
+    )
+    h2_style = ParagraphStyle(
+        'H2', parent=styles['Heading2'],
+        fontName=font_bold, fontSize=13,
+        textColor=colors.HexColor('#1B3022'), spaceBefore=12, spaceAfter=8,
+    )
+    body_style = ParagraphStyle(
+        'Body', parent=styles['Normal'],
+        fontName=font_regular, fontSize=10, leading=14,
+    )
+
+    def _fmt(v):
+        return f"{v:,.0f}".replace(',', ' ')
+
+    story = []
+    story.append(Paragraph('Отчёт по выручке клуба «Гардарика»', title_style))
+    story.append(Paragraph(
+        f"Период: с {start.strftime('%d.%m.%Y')} по {end.strftime('%d.%m.%Y')}",
+        subtitle_style))
+    story.append(Paragraph(
+        f"Сформирован: {get_msk_now().strftime('%d.%m.%Y %H:%M')} (МСК)",
+        subtitle_style))
+    story.append(Spacer(1, 8 * mm))
+
+    # Краткая сводка.
+    summary_data = [
+        ['Завершённые тренировки', str(total_workouts)],
+        ['Выручка за период, ₽', _fmt(total_revenue)],
+        ['Средний чек, ₽', _fmt(avg_check)],
+    ]
+    summary_tbl = Table(summary_data, colWidths=[110 * mm, 60 * mm])
+    summary_tbl.setStyle(TableStyle([
+        ('FONTNAME', (0, 0), (-1, -1), font_regular),
+        ('FONTSIZE', (0, 0), (-1, -1), 11),
+        ('TEXTCOLOR', (0, 0), (0, -1), colors.HexColor('#7A7A7A')),
+        ('TEXTCOLOR', (1, 0), (1, -1), colors.HexColor('#1B3022')),
+        ('FONTNAME', (1, 0), (1, -1), font_bold),
+        ('ALIGN', (1, 0), (1, -1), 'RIGHT'),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
+        ('TOPPADDING', (0, 0), (-1, -1), 8),
+        ('LINEBELOW', (0, 0), (-1, -2), 0.4, colors.HexColor('#E8E5DF')),
+        ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor('#FBF9F7')),
+        ('BOX', (0, 0), (-1, -1), 0.4, colors.HexColor('#E8E5DF')),
+    ]))
+    story.append(summary_tbl)
+    story.append(Spacer(1, 6 * mm))
+
+    story.append(Paragraph('Детализация по услугам', h2_style))
+
+    # Таблица с детализацией.
+    head = ['Тип услуги', 'Услуга', 'Цена ₽',
+            'Кол-во', 'Выручка ₽']
+    body = [head]
+    for r in rows:
+        body.append([
+            r['service_type'] or '—',
+            r['service_name'],
+            _fmt(r['price']),
+            str(r['workouts_count']),
+            _fmt(r['revenue']),
+        ])
+    if rows:
+        body.append(['ИТОГО', '', '', str(total_workouts), _fmt(total_revenue)])
+    else:
+        body.append(['—', 'Завершённых тренировок не найдено', '—', '0', '0'])
+
+    detail_tbl = Table(body,
+                       colWidths=[35 * mm, 60 * mm, 22 * mm, 25 * mm, 30 * mm],
+                       repeatRows=1)
+    style_cmds = [
+        ('FONTNAME', (0, 0), (-1, -1), font_regular),
+        ('FONTSIZE', (0, 0), (-1, -1), 10),
+        ('FONTNAME', (0, 0), (-1, 0), font_bold),
+        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1B3022')),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+        ('ALIGN', (2, 0), (-1, -1), 'RIGHT'),
+        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+        ('TOPPADDING', (0, 0), (-1, -1), 6),
+        ('GRID', (0, 0), (-1, -1), 0.4, colors.HexColor('#E8E5DF')),
+    ]
+    if rows:
+        last = len(body) - 1
+        style_cmds += [
+            ('FONTNAME', (0, last), (-1, last), font_bold),
+            ('BACKGROUND', (0, last), (-1, last), colors.HexColor('#FBF9F7')),
+            ('TEXTCOLOR', (0, last), (-1, last), colors.HexColor('#1B3022')),
+        ]
+    detail_tbl.setStyle(TableStyle(style_cmds))
+    story.append(detail_tbl)
+
+    story.append(Spacer(1, 10 * mm))
+    story.append(Paragraph(
+        'Документ сформирован автоматически информационной системой '
+        'конноспортивного клуба «Гардарика».',
+        ParagraphStyle('foot', parent=body_style,
+                       fontSize=9, alignment=1,
+                       textColor=colors.HexColor('#7A7A7A')),
+    ))
+
+    doc.build(story)
+    pdf = buf.getvalue()
+    buf.close()
+    return pdf
+
+
+@app.route('/reports/revenue.pdf')
+@login_required
+def revenue_report_pdf():
+    sync_workout_statuses()
+    start, end = _parse_report_dates()
+    rows, total_workouts, total_revenue, avg_check = _query_revenue(start, end)
+    pdf_bytes = _build_revenue_pdf(start, end, rows,
+                                   total_workouts, total_revenue, avg_check)
+    filename = f"revenue_{start.strftime('%Y%m%d')}_{end.strftime('%Y%m%d')}.pdf"
+    return send_file(
+        BytesIO(pdf_bytes),
+        mimetype='application/pdf',
+        as_attachment=True,
+        download_name=filename,
+    )
+
 
 def initialize_database():
     with app.app_context():
