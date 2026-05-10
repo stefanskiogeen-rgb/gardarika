@@ -11,6 +11,14 @@ from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import text, func
 from io import BytesIO
 
+# Подгружаем переменные окружения из .env (DATABASE_URL и т. п.).
+# Если python-dotenv не установлен — молча работаем по реальному окружению.
+try:
+    from dotenv import load_dotenv
+    load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), '.env'))
+except ImportError:
+    pass
+
 # Инициализация Flask
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 app = Flask(__name__, template_folder='.')
