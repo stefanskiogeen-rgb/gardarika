@@ -2,10 +2,15 @@
 from werkzeug.security import generate_password_hash, check_password_hash
 
 
+# pbkdf2:sha256 — кроссплатформенный алгоритм (работает на Windows,
+# где OpenSSL без поддержки scrypt).
+_HASH_METHOD = "pbkdf2:sha256"
+
+
 def test_password_hash_is_irreversible():
     """Хеш не должен совпадать с исходным паролем."""
     pwd = "Sup3rS3cret!"
-    h = generate_password_hash(pwd)
+    h = generate_password_hash(pwd, method=_HASH_METHOD)
     assert h != pwd
     assert "pbkdf2" in h or "scrypt" in h
 
@@ -13,7 +18,7 @@ def test_password_hash_is_irreversible():
 def test_password_hash_verifies_correctly():
     """check_password_hash возвращает True только для правильного пароля."""
     pwd = "Sup3rS3cret!"
-    h = generate_password_hash(pwd)
+    h = generate_password_hash(pwd, method=_HASH_METHOD)
     assert check_password_hash(h, pwd) is True
     assert check_password_hash(h, "wrong-pass") is False
 
@@ -21,7 +26,8 @@ def test_password_hash_verifies_correctly():
 def test_password_hash_unique_salt():
     """Один и тот же пароль даёт разные хеши (соль)."""
     pwd = "samepass"
-    assert generate_password_hash(pwd) != generate_password_hash(pwd)
+    assert (generate_password_hash(pwd, method=_HASH_METHOD)
+            != generate_password_hash(pwd, method=_HASH_METHOD))
 
 
 def test_login_route_returns_200(client):

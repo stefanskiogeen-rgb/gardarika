@@ -883,7 +883,9 @@ def register():
             return render_template_string(f"<!DOCTYPE html><html><head>{CSS_STYLE}</head><body><div class='auth-container'><div class='logo'><img src='/static/img/logo.png' alt='Logo'><span>Гардарика</span></div><h1 class='auth-title'>Регистрация</h1><div class='alert alert-error'>Логин занят</div><form method='POST'><div class='form-group'><label>Логин</label><input type='text' name='username' required></div><div class='form-group'><label>Пароль</label><input type='password' name='password' required></div><button type='submit' class='btn-primary'>Зарегистрироваться</button></form><div style='text-align:center;margin-top:20px;'><a href='/login' style='color:var(--primary);text-decoration:none;font-size:14px;'>Уже есть аккаунт? Войти</a></div></div></body></html>")
         
         rider_role = Role.query.filter_by(role_name='Rider').first()
-        u = User(username=username, password=generate_password_hash(password), idrole=rider_role.id)
+        u = User(username=username,
+                 password=generate_password_hash(password, method='pbkdf2:sha256'),
+                 idrole=rider_role.id)
         db.session.add(u)
         db.session.commit()
         session['username'] = username

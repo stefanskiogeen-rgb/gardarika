@@ -38,7 +38,8 @@ def app():
         if not User.query.filter_by(username="testadmin").first():
             db.session.add(User(
                 username="testadmin",
-                password=generate_password_hash("admin-pass"),
+                password=generate_password_hash(
+                    "admin-pass", method="pbkdf2:sha256"),
                 email="admin@example.com",
                 first_name="Test",
                 last_name="Admin",
