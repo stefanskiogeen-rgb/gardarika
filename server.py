@@ -862,6 +862,160 @@ def workouts_update_status(item_id):
     db.session.commit()
     return redirect(url_for('workouts_list'))
 
+
+# ===== ВЫВОД PDF: ЧЕК ОПЛАТЫ УСЛУГ =====
+@app.route('/workouts/<int:item_id>/receipt')
+@login_required
+def workout_receipt(item_id):
+    """Генерирует PDF-чек оплаты услуг по конкретной тренировке.
+
+    На один чек попадают: всадник(и), тренер, лошадь(и), услуга, дата/время и сумма.
+    """
+    w = Workout.query.get_or_404(item_id)
+    pdf_bytes = build_workout_receipt_pdf(w)
+    filename = f"receipt_workout_{item_id}.pdf"
+    return send_file(
+        BytesIO(pdf_bytes),
+        mimetype='application/pdf',
+        as_attachment=False,
+        download_name=filename,
+    )
+
+
+def build_workout_receipt_pdf(w):
+    """Собирает PDF-чек по тренировке. Возвращает bytes."""
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.units import mm
+    from reportlab.pdfgen import canvas
+    from reportlab.pdfbase import pdfmetrics
+    from reportlab.pdfbase.ttfonts import TTFont
+
+    # Регистрируем шрифт с поддержкой кириллицы.
+    # Сначала ищем рядом с проектом (static/fonts/DejaVuSans*.ttf — лежат в репо,
+    # работает на любой ОС: Windows / macOS / Linux), потом — системные пути.
+    font_name = 'DejaVu'
+    bold_name = 'DejaVu-Bold'
+    bundled_dir = os.path.join(BASE_DIR, 'static', 'fonts')
+    candidates = [
+        os.path.join(bundled_dir, 'DejaVuSans.ttf'),
+        '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
+        '/usr/share/fonts/dejavu/DejaVuSans.ttf',
+        '/Library/Fonts/DejaVuSans.ttf',
+        '/System/Library/Fonts/Supplemental/Arial Unicode.ttf',
+    ]
+    bold_candidates = [
+        os.path.join(bundled_dir, 'DejaVuSans-Bold.ttf'),
+        '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf',
+        '/usr/share/fonts/dejavu/DejaVuSans-Bold.ttf',
+        '/Library/Fonts/DejaVuSans-Bold.ttf',
+        '/System/Library/Fonts/Supplemental/Arial Unicode.ttf',
+    ]
+    regular_path = next((p for p in candidates if os.path.exists(p)), None)
+    bold_path = next((p for p in bold_candidates if os.path.exists(p)), None)
+    if regular_path and font_name not in pdfmetrics.getRegisteredFontNames():
+        pdfmetrics.registerFont(TTFont(font_name, regular_path))
+    if bold_path and bold_name not in pdfmetrics.getRegisteredFontNames():
+        pdfmetrics.registerFont(TTFont(bold_name, bold_path))
+    use_font = font_name if regular_path else 'Helvetica'
+    use_bold = bold_name if bold_path else (font_name if regular_path else 'Helvetica-Bold')
+
+    # Подготовка данных
+    riders = []
+    horses = []
+    for p in w.participants:
+        if p.idrider and p.rider:
+            riders.append(p.rider.full_name)
+        elif p.guest_name:
+            riders.append(f"{p.guest_name} (гость)")
+        if p.idhorse and p.horse:
+            horses.append(p.horse.name)
+        elif p.idrider or p.guest_name:
+            horses.append('Своя')
+    riders_str = ', '.join(riders) if riders else 'Не назначен'
+    horses_str = ', '.join(horses) if horses else 'Не выбрана'
+    trainer_str = w.trainer_rel.full_name if w.trainer_rel else 'Без тренера'
+    service = w.service_rel
+    service_name = service.name if service else 'Не указана'
+    duration = service.duration if service and service.duration else 0
+    price = service.price if service and service.price else 0
+    total = price * max(1, len(riders) or 1)
+    date_str = w.datetime_start.strftime('%d.%m.%Y') if w.datetime_start else '—'
+    time_str = w.datetime_start.strftime('%H:%M') if w.datetime_start else '—'
+    issued_str = get_msk_now().strftime('%d.%m.%Y %H:%M')
+    receipt_no = f"{w.id:06d}"
+
+    # Рисуем PDF
+    buf = BytesIO()
+    c = canvas.Canvas(buf, pagesize=A4)
+    page_w, page_h = A4
+
+    # Заголовок
+    c.setFont(use_bold, 18)
+    c.drawCentredString(page_w / 2, page_h - 25 * mm, 'КОННОСПОРТИВНЫЙ КЛУБ «ГАРДАРИКА»')
+    c.setFont(use_font, 10)
+    c.drawCentredString(page_w / 2, page_h - 32 * mm, 'Чек об оплате услуг')
+
+    # Линия
+    c.setStrokeColorRGB(0.7, 0.7, 0.7)
+    c.line(20 * mm, page_h - 38 * mm, page_w - 20 * mm, page_h - 38 * mm)
+
+    # Шапка
+    c.setFont(use_bold, 12)
+    c.drawString(20 * mm, page_h - 48 * mm, f'Чек № {receipt_no}')
+    c.setFont(use_font, 10)
+    c.drawRightString(page_w - 20 * mm, page_h - 48 * mm, f'Дата формирования: {issued_str}')
+
+    # Содержание
+    y = page_h - 60 * mm
+    line_h = 8 * mm
+
+    def row(label, value):
+        nonlocal y
+        c.setFont(use_bold, 10)
+        c.drawString(20 * mm, y, label)
+        c.setFont(use_font, 10)
+        c.drawString(70 * mm, y, str(value))
+        y -= line_h
+
+    row('Всадник(и):', riders_str)
+    row('Тренер:', trainer_str)
+    row('Лошадь(и):', horses_str)
+    row('Услуга:', service_name)
+    row('Дата проведения:', f'{date_str} в {time_str}')
+    row('Длительность:', f'{duration} мин' if duration else '—')
+    row('Цена услуги:', f'{price} ₽')
+    row('Кол-во участников:', str(max(1, len(riders) or 1)))
+    row('Статус тренировки:', w.status or 'Запланировано')
+
+    # Итог
+    y -= 4 * mm
+    c.setStrokeColorRGB(0.7, 0.7, 0.7)
+    c.line(20 * mm, y, page_w - 20 * mm, y)
+    y -= 10 * mm
+    c.setFont(use_bold, 14)
+    c.drawString(20 * mm, y, 'ИТОГО К ОПЛАТЕ:')
+    c.drawRightString(page_w - 20 * mm, y, f'{total} ₽')
+
+    # Подпись
+    y -= 30 * mm
+    c.setFont(use_font, 10)
+    c.drawString(20 * mm, y, '___________________________')
+    c.drawString(20 * mm, y - 6 * mm, 'Подпись администратора')
+
+    # Футер
+    c.setFont(use_font, 8)
+    c.setFillColorRGB(0.5, 0.5, 0.5)
+    c.drawCentredString(
+        page_w / 2,
+        15 * mm,
+        'КСК «Гардарика» — конноспортивный клуб. Спасибо, что выбираете нас!',
+    )
+
+    c.showPage()
+    c.save()
+    return buf.getvalue()
+
+
 # --- АБОНЕМЕНТЫ ---
 def _inflect_lessons(n):
     if n % 10 == 1 and n % 100 != 11: return f'{n} занятие'

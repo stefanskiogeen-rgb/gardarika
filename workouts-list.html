@@ -740,6 +740,8 @@
                         {% if is_admin %}
                         <td>
                             <div style="display:flex; gap:10px;">
+                                <a href="/workouts/{{w.id}}/receipt" target="_blank" class="btn-icon"
+                                    title="Сформировать PDF-чек оплаты услуг">📄</a>
                                 <button class="btn-icon"
                                     onclick="window.location.href='/workouts/edit/{{w.id}}'">✎</button>
                                 <form action="/workouts/delete/{{w.id}}" method="POST"
