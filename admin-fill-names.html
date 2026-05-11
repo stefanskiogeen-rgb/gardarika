@@ -47,6 +47,20 @@
         <div class="card">
             {% if users %}
             <div class="hint">Найдено записей без ФИО: <b>{{ users|length }}</b>. После сохранения они автоматически исчезнут из этого списка.</div>
+
+            <!-- Быстрая случайная подстановка ФИО для демонстрации -->
+            <div style="background:rgba(27,48,34,0.04); border:1px dashed var(--border); border-radius:var(--radius-md); padding:16px 18px; margin-bottom:24px;">
+                <div style="font-size:13px; color:var(--primary); font-weight:700; margin-bottom:10px;">Заполнить случайными русскими ФИО (для демонстрации)</div>
+                <form action="/admin/fill-random" method="POST" style="display:flex; gap:12px; align-items:center; flex-wrap:wrap;">
+                    <label style="font-size:12px; color:var(--text-muted);">Оставить пустыми тренеров:
+                        <input type="number" name="keep_trainers" value="0" min="0" max="20" class="form-input" style="width:80px; padding:6px 8px; display:inline-block; margin-left:6px;">
+                    </label>
+                    <label style="font-size:12px; color:var(--text-muted);">Оставить пустыми всадников:
+                        <input type="number" name="keep_riders" value="0" min="0" max="20" class="form-input" style="width:80px; padding:6px 8px; display:inline-block; margin-left:6px;">
+                    </label>
+                    <button type="submit" class="btn-primary" style="padding:10px 18px; font-size:13px;" onclick="return confirm('Заполнить случайными ФИО? Уже заполненные записи не трогаем.')">Заполнить случайными</button>
+                </form>
+            </div>
             <form action="/admin/fill-names" method="POST">
                 <table>
                     <thead>

@@ -1502,6 +1502,75 @@ def admin_invite(user_id):
     return render_template('admin-invite.html', u=u)
 
 
+# ===== СЛУЧАЙНОЕ ЗАПОЛНЕНИЕ ФИО ДЛЯ ДЕМОНСТРАЦИИ =====
+
+_RANDOM_NAMES = {
+    'M': ['Иван', 'Алексей', 'Дмитрий', 'Сергей', 'Максим', 'Андрей',
+          'Николай', 'Владимир', 'Михаил', 'Артём', 'Павел', 'Юрий'],
+    'F': ['Анна', 'Мария', 'Елена', 'Ольга', 'Татьяна', 'Наталья',
+          'Юлия', 'Ирина', 'Светлана', 'Екатерина', 'Дарья', 'Полина'],
+}
+_RANDOM_LASTNAMES = {
+    'M': ['Иванов', 'Петров', 'Сидоров', 'Кузнецов', 'Смирнов', 'Попов',
+          'Васильев', 'Соколов', 'Михайлов', 'Новиков', 'Фёдоров', 'Морозов'],
+    'F': ['Иванова', 'Петрова', 'Сидорова', 'Кузнецова', 'Смирнова', 'Попова',
+          'Васильева', 'Соколова', 'Михайлова', 'Новикова', 'Фёдорова', 'Морозова'],
+}
+
+
+def _make_random_person():
+    import random
+    gender = random.choice(('M', 'F'))
+    name = random.choice(_RANDOM_NAMES[gender])
+    lastname = random.choice(_RANDOM_LASTNAMES[gender])
+    phone = "+7-9{}{}-{}{}{}-{}{}-{}{}".format(*[random.randint(0, 9) for _ in range(9)])
+    return name, lastname, phone
+
+
+@app.route('/admin/fill-random', methods=['POST'])
+@login_required
+@admin_required
+def admin_fill_random():
+    """Заполняет случайными русскими ФИО+телефонами всех тренеров и
+    всадников, у которых имя и фамилия пустые. Параметрами keep_trainers
+    и keep_riders можно оставить несколько записей нетронутыми."""
+    try:
+        keep_trainers = max(0, int(request.form.get('keep_trainers', 0)))
+    except ValueError:
+        keep_trainers = 0
+    try:
+        keep_riders = max(0, int(request.form.get('keep_riders', 0)))
+    except ValueError:
+        keep_riders = 0
+
+    empty_q = (
+        User.query
+        .filter(((User.name.is_(None)) | (User.name == ''))
+                & ((User.lastname.is_(None)) | (User.lastname == '')))
+        .join(Role, User.idrole == Role.id)
+    )
+    trainers_empty = empty_q.filter(Role.role_name == 'Trainer').order_by(User.id).all()
+    riders_empty = empty_q.filter(Role.role_name == 'Rider').order_by(User.id).all()
+
+    # Оставляем последние keep_* записей нетронутыми.
+    to_fill_trainers = trainers_empty[:max(0, len(trainers_empty) - keep_trainers)]
+    to_fill_riders = riders_empty[:max(0, len(riders_empty) - keep_riders)]
+
+    filled = 0
+    for u in (to_fill_trainers + to_fill_riders):
+        name, lastname, phone = _make_random_person()
+        u.name = name
+        u.lastname = lastname
+        u.first_name = name
+        u.last_name = lastname
+        if not (u.phone or '').strip():
+            u.phone = phone
+        filled += 1
+    if filled:
+        db.session.commit()
+    return redirect(url_for('admin_fill_names'))
+
+
 # ===== БЫСТРОЕ ЗАПОЛНЕНИЕ ФИО У ТЕНЕВЫХ УЧЁТОК БЕЗ ИМЕНИ =====
 
 @app.route('/admin/fill-names', methods=['GET', 'POST'])
