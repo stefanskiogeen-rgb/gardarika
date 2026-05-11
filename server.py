@@ -1893,6 +1893,33 @@ def _migrate_user_profile_fields(is_postgres):
 
         # 2. Переносим имена существующих тренеров в users (если нужно)
         if is_postgres:
+            # 2.0. Сначала на всякий случай снимаем NOT NULL со старых
+            # унаследованных колонок trainers/riders.name/lastname/phone
+            # и ставим DEFAULT ''. Так даже если последующий DROP COLUMN
+            # не сработает (например, из-за зависящих view), новые INSERT
+            # без этих полей всё равно пройдут.
+            for _tbl in ('trainers', 'riders'):
+                for _col in ('name', 'lastname', 'phone'):
+                    try:
+                        has_col = db.session.execute(text(
+                            "SELECT 1 FROM information_schema.columns "
+                            "WHERE table_name=:t AND column_name=:c"
+                        ), {"t": _tbl, "c": _col}).fetchone() is not None
+                        if has_col:
+                            db.session.execute(text(
+                                f"ALTER TABLE {_tbl} "
+                                f"ALTER COLUMN {_col} DROP NOT NULL"
+                            ))
+                            db.session.execute(text(
+                                f"ALTER TABLE {_tbl} "
+                                f"ALTER COLUMN {_col} SET DEFAULT ''"
+                            ))
+                            db.session.commit()
+                    except Exception as _e:
+                        # Если колонки уже нет / прав нет / etc. — пропускаем.
+                        db.session.rollback()
+                        print(f"WARN drop NOT NULL on {_tbl}.{_col}: {_e}")
+
             trainer_has_name = db.session.execute(text(
                 "SELECT column_name FROM information_schema.columns "
                 "WHERE table_name='trainers' AND column_name='name'"
@@ -1943,11 +1970,16 @@ def _migrate_user_profile_fields(is_postgres):
                     FROM trainers t
                     WHERE t.iduser = u.id
                 """))
-                db.session.execute(text(
-                    "ALTER TABLE trainers DROP COLUMN IF EXISTS name, "
-                    "DROP COLUMN IF EXISTS lastname, "
-                    "DROP COLUMN IF EXISTS phone;"))
-                db.session.commit()
+                try:
+                    db.session.execute(text(
+                        "ALTER TABLE trainers "
+                        "DROP COLUMN IF EXISTS name CASCADE, "
+                        "DROP COLUMN IF EXISTS lastname CASCADE, "
+                        "DROP COLUMN IF EXISTS phone CASCADE;"))
+                    db.session.commit()
+                except Exception as _e:
+                    db.session.rollback()
+                    print(f"WARN drop legacy columns trainers: {_e}")
 
             rider_has_name = db.session.execute(text(
                 "SELECT column_name FROM information_schema.columns "
@@ -1997,11 +2029,16 @@ def _migrate_user_profile_fields(is_postgres):
                     FROM riders r
                     WHERE r.iduser = u.id
                 """))
-                db.session.execute(text(
-                    "ALTER TABLE riders DROP COLUMN IF EXISTS name, "
-                    "DROP COLUMN IF EXISTS lastname, "
-                    "DROP COLUMN IF EXISTS phone;"))
-                db.session.commit()
+                try:
+                    db.session.execute(text(
+                        "ALTER TABLE riders "
+                        "DROP COLUMN IF EXISTS name CASCADE, "
+                        "DROP COLUMN IF EXISTS lastname CASCADE, "
+                        "DROP COLUMN IF EXISTS phone CASCADE;"))
+                    db.session.commit()
+                except Exception as _e:
+                    db.session.rollback()
+                    print(f"WARN drop legacy columns riders: {_e}")
 
         # 3. Бекфилл: если name/lastname пустые, а в first_name/last_name
         #    лежат данные (например, от прошлой миграции) — скопировать обратно.
