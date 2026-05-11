@@ -259,7 +259,7 @@
 
     <div class="header">
         <h1 class="page-title">Услуги</h1>
-        {% if is_admin %}<button class="btn-primary" onclick="window.location.href='/services/add'">+ Новая услуга</button>{% endif %}
+        {% if is_staff %}<button class="btn-primary" onclick="window.location.href='/services/add'">+ Новая услуга</button>{% endif %}
     </div>
 
     <div class="search-container">
@@ -268,14 +268,14 @@
     </div>
     <div class="table-wrap">
         <table>
-            <thead><tr><th>Название</th><th>Длительность</th><th>Цена</th>{% if is_admin %}<th>Действия</th>{% endif %}</tr></thead>
+            <thead><tr><th>Название</th><th>Длительность</th><th>Цена</th>{% if is_staff %}<th>Действия</th>{% endif %}</tr></thead>
             <tbody>
                 {% for s in services %}
                 <tr>
                     <td><b>{{s.name|default('—', true)}}</b></td>
                     <td><span style="font-weight:600">{{s.duration|default(60, true)}}</span> мин</td>
                     <td><b style="color:var(--primary)">{{s.price|default(0, true)}} ₽</b></td>
-                    {% if is_admin %}
+                    {% if is_staff %}
                     <td>
                         <div style="display:flex; gap:10px;">
                             <button class="btn-icon" onclick="window.location.href='/services/edit/{{s.id}}'">✎</button>

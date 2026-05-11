@@ -810,7 +810,7 @@
 
         <div class="header">
             <h1 class="page-title">Всадники</h1>
-            {% if is_admin %}<button class="btn-primary" onclick="window.location.href='/riders/add'">+ Добавить
+            {% if is_staff %}<button class="btn-primary" onclick="window.location.href='/riders/add'">+ Добавить
                 всадника</button>{% endif %}
         </div>
 
@@ -855,7 +855,7 @@
                     <tr>
                         <th>Всадник</th>
                         <th>Телефон</th>
-                        <th>Абонемент</th>{% if is_admin %}<th>Действия</th>{% endif %}
+                        <th>Абонемент</th>{% if is_staff %}<th>Действия</th>{% endif %}
                     </tr>
                 </thead>
                 <tbody>
@@ -872,21 +872,21 @@
                         <td>{{r.phone|default('—', true)}}</td>
                         <td>
                                 <div style="display:flex; align-items:center; gap:8px;">
-                                    {% if is_admin %}<button class="btn-mini" onclick="adjustBalance('{{r.id}}', -1, '{{ 'rental' if r.subscription_status and 'Аренда' in r.subscription_status else 'sub' }}')">−</button>{% endif %}
+                                    {% if is_staff %}<button class="btn-mini" onclick="adjustBalance('{{r.id}}', -1, '{{ 'rental' if r.subscription_status and 'Аренда' in r.subscription_status else 'sub' }}')">−</button>{% endif %}
                                     
-                                    <button id="sub-badge-{{r.id}}" class="badge {% if r.subscription_status == 'Закончился' %}badge-danger{% elif r.subscription_balance > 0 or r.rental_balance > 0 %}badge-success{% else %}badge-neutral{% endif %}" {% if is_admin %}onclick="showSubModal('{{r.id}}', '{{r.name}}')" {% else %}style="cursor:default" {% endif %}>
-                                        {{r.subscription_status if r.subscription_status else ('Добавить+' if is_admin else 'Нет абонемента')}}
+                                    <button id="sub-badge-{{r.id}}" class="badge {% if r.subscription_status == 'Закончился' %}badge-danger{% elif r.subscription_balance > 0 or r.rental_balance > 0 %}badge-success{% else %}badge-neutral{% endif %}" {% if is_staff %}onclick="showSubModal('{{r.id}}', '{{r.name}}')" {% else %}style="cursor:default" {% endif %}>
+                                        {{r.subscription_status if r.subscription_status else ('Добавить+' if is_staff else 'Нет абонемента')}}
                                     </button>
 
-                                    {% if is_admin %}<button class="btn-mini" onclick="adjustBalance('{{r.id}}', 1, '{{ 'rental' if r.subscription_status and 'Аренда' in r.subscription_status else 'sub' }}')">+</button>{% endif %}
+                                    {% if is_staff %}<button class="btn-mini" onclick="adjustBalance('{{r.id}}', 1, '{{ 'rental' if r.subscription_status and 'Аренда' in r.subscription_status else 'sub' }}')">+</button>{% endif %}
                                 </div>
                         </td>
-                        {% if is_admin %}
+                        {% if is_staff %}
                         <td>
                             <div style="display:flex; gap:10px; flex-wrap:wrap;">
                                 <button class="btn-icon"
                                     onclick="window.location.href='/riders/edit/{{r.id}}'" title="Редактировать">✎</button>
-                                {% if r.user and r.user.is_shadow %}
+                                {% if is_admin and r.user and r.user.is_shadow %}
                                 <button class="btn-icon"
                                     onclick="window.location.href='/admin/invite/{{r.user.id}}'" title="Пригласить в систему" style="color:var(--accent);">✉</button>
                                 {% endif %}

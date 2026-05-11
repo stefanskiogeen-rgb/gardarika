@@ -259,7 +259,7 @@
 
     <div class="header">
         <h1 class="page-title">Лошади</h1>
-        {% if is_admin %}<button class="btn-primary" onclick="window.location.href='/horses/add'">+ Добавить лошадь</button>{% endif %}
+        {% if is_staff %}<button class="btn-primary" onclick="window.location.href='/horses/add'">+ Добавить лошадь</button>{% endif %}
     </div>
 
     <div class="search-container">
@@ -268,14 +268,14 @@
     </div>
     <div class="table-wrap">
         <table>
-            <thead><tr><th>Кличка</th><th>Порода</th><th>Статус</th>{% if is_admin %}<th>Действия</th>{% endif %}</tr></thead>
+            <thead><tr><th>Кличка</th><th>Порода</th><th>Статус</th>{% if is_staff %}<th>Действия</th>{% endif %}</tr></thead>
             <tbody>
                 {% for h in horses %}
                 <tr>
                     <td><div style="display:flex; align-items:center; gap:16px;">{% if h.photo %}<img src="/static/uploads/{{h.photo}}" style="width:48px; height:48px; border-radius:14px; object-fit:cover; border:1px solid var(--border);">{% else %}<div style="width:48px; height:48px; border-radius:14px; background:rgba(27,48,34,0.05); color:var(--primary); display:flex; align-items:center; justify-content:center; font-weight:800; font-size:18px;">{{h.name[0]}}</div>{% endif %}<b>{{h.name|default('—', true)}}</b></div></td>
                     <td>{{h.breed.name if h.breed else '—'}}</td>
                     <td><span class="badge badge-success">{{h.status|default('В работе', true)}}</span></td>
-                    {% if is_admin %}
+                    {% if is_staff %}
                     <td>
                         <div style="display:flex; gap:10px;">
                             <button class="btn-icon" onclick="window.location.href='/horses/edit/{{h.id}}'">✎</button>

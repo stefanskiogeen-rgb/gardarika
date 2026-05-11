@@ -215,3 +215,61 @@ def test_admin_invite_converts_shadow_user(app, client):
         "username": "petr_real", "password": "newpass1",
     }, follow_redirects=False)
     assert r2.status_code in (302, 303)
+
+
+# ===== ПРАВА ТРЕНЕРА =====
+
+def _make_trainer(app, username="trainer_perm", password="tpass"):
+    """Создаёт одобренного тренера для проверки прав. Возвращает username/password."""
+    from server import User, Trainer, Role, db
+    from werkzeug.security import generate_password_hash
+    with app.app_context():
+        role = Role.query.filter_by(role_name="Trainer").first()
+        if not User.query.filter_by(username=username).first():
+            u = User(
+                username=username,
+                password=generate_password_hash(password, method="pbkdf2:sha256"),
+                name="Тренер", lastname="Прав",
+                idrole=role.id, is_approved=True, is_shadow=False,
+            )
+            db.session.add(u)
+            db.session.flush()
+            db.session.add(Trainer(iduser=u.id))
+            db.session.commit()
+    return username, password
+
+
+def test_trainer_can_open_workouts_add(app, client):
+    """Тренер должен иметь право создавать тренировки (GET формы)."""
+    u, p = _make_trainer(app, "trainer_can_workout")
+    client.post("/login", data={"username": u, "password": p},
+                follow_redirects=True)
+    r = client.get("/workouts/add", follow_redirects=False)
+    assert r.status_code == 200
+
+
+def test_trainer_can_open_riders_add(app, client):
+    """Тренер может добавлять всадников в список."""
+    u, p = _make_trainer(app, "trainer_can_riders")
+    client.post("/login", data={"username": u, "password": p},
+                follow_redirects=True)
+    r = client.get("/riders/add", follow_redirects=False)
+    assert r.status_code == 200
+
+
+def test_trainer_cannot_access_revenue_report(app, client):
+    """Тренер НЕ имеет доступа к отчёту по выручке."""
+    u, p = _make_trainer(app, "trainer_no_revenue")
+    client.post("/login", data={"username": u, "password": p},
+                follow_redirects=True)
+    r = client.get("/reports/revenue", follow_redirects=False)
+    assert r.status_code == 403
+
+
+def test_trainer_cannot_access_admin_approvals(app, client):
+    """Тренер НЕ имеет доступа к одобрению других тренеров."""
+    u, p = _make_trainer(app, "trainer_no_approvals")
+    client.post("/login", data={"username": u, "password": p},
+                follow_redirects=True)
+    r = client.get("/admin/approvals", follow_redirects=False)
+    assert r.status_code == 403

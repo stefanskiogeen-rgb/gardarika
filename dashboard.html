@@ -235,7 +235,7 @@
 
     <div class="header">
         <h2 class="page-title" style="font-size:24px;">Ближайшие занятия</h2>
-        {% if is_admin %}<button class="btn-primary" onclick="window.location.href='/workouts/add'">+ Добавить</button>{% endif %}
+        {% if is_staff %}<button class="btn-primary" onclick="window.location.href='/workouts/add'">+ Добавить</button>{% endif %}
     </div>
     <div class="table-wrap" style="margin-bottom:48px;">
         <table>
@@ -251,7 +251,7 @@
                         {% endfor %}
                     </td>
                     <td>{{w.trainer|default('—', true)}}</td>
-                    <td><button class="badge {{'badge-success' if w.status == 'Запланировано' else 'badge-info'}}" {% if is_admin %}onclick="showStatusModal('{{w.id}}', '{{w.status}}')"{% else %}style="cursor:default"{% endif %}>{{w.status}}</button></td>
+                    <td><button class="badge {{'badge-success' if w.status == 'Запланировано' else 'badge-info'}}" {% if is_staff %}onclick="showStatusModal('{{w.id}}', '{{w.status}}')"{% else %}style="cursor:default"{% endif %}>{{w.status}}</button></td>
                 </tr>
                 {% endfor %}
             </tbody>

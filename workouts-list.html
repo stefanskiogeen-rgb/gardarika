@@ -671,7 +671,7 @@
                         endif %} onchange="updateFilters()">
                     По всем датам
                 </label>
-                {% if is_admin %}<button class="btn-primary" onclick="window.location.href='/workouts/add'" style="width: var(--btn-width, auto);">+ Составить план</button>{% endif %}
+                {% if is_staff %}<button class="btn-primary" onclick="window.location.href='/workouts/add'" style="width: var(--btn-width, auto);">+ Составить план</button>{% endif %}
             </div>
         </div>
 
@@ -728,7 +728,7 @@
                         <th>Дата / Время</th>
                         <th>Участники (Всадник — Лошадь)</th>
                         <th>Тренер</th>
-                        <th>Статус</th>{% if is_admin %}<th>Действия</th>{% endif %}
+                        <th>Статус</th>{% if is_staff %}<th>Действия</th>{% endif %}
                     </tr>
                 </thead>
                 <tbody>
@@ -746,10 +746,10 @@
                         <td>{{w.trainer|default('—', true)}}</td>
                         <td><button
                                 class="badge {{'badge-success' if w.status == 'Запланировано' else 'badge-info' if w.status == 'Проводится' else 'badge-neutral'}}"
-                                {% if is_admin %}onclick="showStatusModal('{{w.id}}', '{{w.status}}')" {% else
+                                {% if is_staff %}onclick="showStatusModal('{{w.id}}', '{{w.status}}')" {% else
                                 %}style="cursor:default" {% endif %}>{{w.status|default('Запланировано',
                                 true)}}</button></td>
-                        {% if is_admin %}
+                        {% if is_staff %}
                         <td>
                             <div style="display:flex; gap:10px;">
                                 <a href="/workouts/{{w.id}}/receipt" target="_blank" class="btn-icon"

@@ -399,6 +399,10 @@ def inject_user():
         'is_trainer': is_trainer,
         'is_rider': is_rider,
         'is_guest': is_guest,
+        # Удобный алиас «персонал»: админ или тренер.
+        # Используется в шаблонах, чтобы показывать кнопки add/edit/delete
+        # одинаково и админу, и тренеру.
+        'is_staff': bool(is_admin or is_trainer),
     }
 
 @app.route('/')
@@ -500,7 +504,8 @@ def horses_list():
 @app.route('/horses/add', methods=['GET', 'POST'])
 @login_required
 def horses_add():
-    if not session.get('is_admin'): return "Отказано", 403
+    if not (session.get('is_admin') or session.get('is_trainer')):
+        return "Отказано", 403
     if request.method == 'POST':
         breed_name = request.form.get('breed', 'Неизвестна')
         breed = Breed.query.filter_by(name=breed_name).first() or Breed(name=breed_name)
@@ -529,7 +534,8 @@ def horses_add():
 @app.route('/horses/edit/<int:item_id>', methods=['GET', 'POST'])
 @login_required
 def horses_edit(item_id):
-    if not session.get('is_admin'): return "Отказано", 403
+    if not (session.get('is_admin') or session.get('is_trainer')):
+        return "Отказано", 403
     horse = Horse.query.get_or_404(item_id)
     if request.method == 'POST':
         horse.name = request.form.get('name')
@@ -572,7 +578,8 @@ def horses_edit(item_id):
 @app.route('/horses/delete/<int:item_id>', methods=['POST'])
 @login_required
 def horses_delete(item_id):
-    if not session.get('is_admin'): return "Отказано", 403
+    if not (session.get('is_admin') or session.get('is_trainer')):
+        return "Отказано", 403
     horse = Horse.query.get_or_404(item_id)
     # Участники тренировок ссылаются на лошадь через FK —
     # обнуляем ссылку, чтобы не падать по ограничению.
@@ -742,7 +749,7 @@ def riders_list():
 
 @app.route('/riders/add', methods=['GET', 'POST'])
 @login_required
-@admin_required
+@staff_required
 def riders_add():
     if request.method == 'POST':
         photo = request.files.get('photo')
@@ -790,7 +797,7 @@ def riders_add():
 
 @app.route('/riders/edit/<int:item_id>', methods=['GET', 'POST'])
 @login_required
-@admin_required
+@staff_required
 def riders_edit(item_id):
     rider = Rider.query.get_or_404(item_id)
     if request.method == 'POST':
@@ -834,7 +841,7 @@ def riders_edit(item_id):
 
 @app.route('/riders/delete/<int:item_id>', methods=['POST'])
 @login_required
-@admin_required
+@staff_required
 def riders_delete(item_id):
     """Удалить всадника. У связанных строк workout_participants
     обнуляем ссылку на этого всадника — сама строка участника
@@ -853,7 +860,8 @@ def riders_delete(item_id):
 @app.route('/riders/<int:item_id>/subscription', methods=['POST'])
 @login_required
 def rider_add_subscription(item_id):
-    if not session.get('is_admin'): return "Отказано", 403
+    if not (session.get('is_admin') or session.get('is_trainer')):
+        return "Отказано", 403
     
     amount_str = request.form.get('amount', '0')
     amount = int(amount_str) if amount_str and amount_str.strip() else 0
@@ -871,7 +879,8 @@ def rider_add_subscription(item_id):
 @app.route('/riders/<int:item_id>/adjust_balance', methods=['POST'])
 @login_required
 def rider_adjust_balance(item_id):
-    if not session.get('is_admin'): return jsonify({"error": "Отказано"}), 403
+    if not (session.get('is_admin') or session.get('is_trainer')):
+        return jsonify({"error": "Отказано"}), 403
     
     b_type = request.form.get('type') # 'sub' or 'rental'
     delta = int(request.form.get('delta', 0))
@@ -900,7 +909,8 @@ def services_list():
 @app.route('/services/add', methods=['GET', 'POST'])
 @login_required
 def services_add():
-    if not session.get('is_admin'): return "Отказано", 403
+    if not (session.get('is_admin') or session.get('is_trainer')):
+        return "Отказано", 403
     if request.method == 'POST':
         s = Service(
             name=request.form.get('name'), 
@@ -917,7 +927,8 @@ def services_add():
 @app.route('/services/edit/<int:item_id>', methods=['GET', 'POST'])
 @login_required
 def services_edit(item_id):
-    if not session.get('is_admin'): return "Отказано", 403
+    if not (session.get('is_admin') or session.get('is_trainer')):
+        return "Отказано", 403
     service = Service.query.get_or_404(item_id)
     if request.method == 'POST':
         service.name = request.form.get('name')
@@ -949,7 +960,8 @@ def services_edit(item_id):
 @app.route('/services/delete/<int:item_id>', methods=['POST'])
 @login_required
 def services_delete(item_id):
-    if not session.get('is_admin'): return "Отказано", 403
+    if not (session.get('is_admin') or session.get('is_trainer')):
+        return "Отказано", 403
     service = Service.query.get_or_404(item_id)
     # Тренировки ссылаются на услугу через FK — обнуляем ссылку.
     db.session.execute(
@@ -983,7 +995,8 @@ def workouts_list():
 @app.route('/workouts/add', methods=['GET', 'POST'])
 @login_required
 def workouts_add():
-    if not session.get('is_admin'): return "Отказано", 403
+    if not (session.get('is_admin') or session.get('is_trainer')):
+        return "Отказано", 403
     if request.method == 'POST':
         dt = datetime.strptime(f"{request.form.get('date')} {request.form.get('time')}", '%Y-%m-%d %H:%M')
         w = Workout(
@@ -1032,7 +1045,8 @@ def workouts_add():
 @app.route('/workouts/edit/<int:item_id>', methods=['GET', 'POST'])
 @login_required
 def workouts_edit(item_id):
-    if not session.get('is_admin'): return "Отказано", 403
+    if not (session.get('is_admin') or session.get('is_trainer')):
+        return "Отказано", 403
     w = Workout.query.get_or_404(item_id)
     if request.method == 'POST':
         old_status = w.status
@@ -1077,7 +1091,8 @@ def workouts_edit(item_id):
 @app.route('/workouts/delete/<int:item_id>', methods=['POST'])
 @login_required
 def workouts_delete(item_id):
-    if not session.get('is_admin'): return "Отказано", 403
+    if not (session.get('is_admin') or session.get('is_trainer')):
+        return "Отказано", 403
     w = Workout.query.get_or_404(item_id)
     # Чистим участников тренировки (FK workout_participants.idworkout).
     db.session.execute(
@@ -1090,7 +1105,8 @@ def workouts_delete(item_id):
 @app.route('/workouts/<int:item_id>/status', methods=['POST'])
 @login_required
 def workouts_update_status(item_id):
-    if not session.get('is_admin'): return "Отказано", 403
+    if not (session.get('is_admin') or session.get('is_trainer')):
+        return "Отказано", 403
     w = Workout.query.get_or_404(item_id)
     old_status = w.status
     w.status = request.form.get('status')
