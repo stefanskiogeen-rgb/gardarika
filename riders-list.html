@@ -814,6 +814,15 @@
                 всадника</button>{% endif %}
         </div>
 
+        {% if is_admin and empty_fio_count and empty_fio_count > 0 %}
+        <div style="background:rgba(197,160,89,0.12); border:1px solid rgba(197,160,89,0.35); border-radius:14px; padding:14px 18px; margin-bottom:18px; display:flex; align-items:center; justify-content:space-between; gap:16px; flex-wrap:wrap;">
+            <div style="font-size:14px; color:var(--primary);">
+                <b>{{ empty_fio_count }}</b> всадник(ов) без заполненных ФИО — в списке отображаются логины (<code>rider1</code>, <code>rider2</code>, …).
+            </div>
+            <a href="/admin/fill-names" style="background:var(--primary); color:white; padding:10px 18px; border-radius:10px; text-decoration:none; font-weight:700; font-size:13px;">Заполнить ФИО →</a>
+        </div>
+        {% endif %}
+
         <div class="search-container">
             <svg class="search-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                 stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">

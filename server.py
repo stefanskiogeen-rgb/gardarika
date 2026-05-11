@@ -586,7 +586,13 @@ def trainers_list():
                 .join(User, Trainer.iduser == User.id)
                 .filter(User.is_approved == True)  # noqa: E712
                 .all())
-    return render_template('trainers-list.html', trainers=trainers)
+    # Сколько тренеров без ФИО — для баннера «Заполнить ФИО».
+    empty_fio_count = sum(
+        1 for t in trainers
+        if t.user and not ((t.user.name or '').strip() or (t.user.lastname or '').strip())
+    )
+    return render_template('trainers-list.html', trainers=trainers,
+                           empty_fio_count=empty_fio_count)
 
 
 def _unique_username(base):
@@ -699,6 +705,11 @@ def trainers_delete(item_id):
 @login_required
 def riders_list():
     riders = Rider.query.all()
+    # Сколько всадников без ФИО — для баннера.
+    empty_fio_count = sum(
+        1 for r in riders
+        if r.user and not ((r.user.name or '').strip() or (r.user.lastname or '').strip())
+    )
     # Зарегистрированные всадники, которых ещё не «привязали» к списку.
     # Их видят только админ и тренер — чтобы добавить в список.
     linkable_users = []
@@ -713,7 +724,8 @@ def riders_list():
             linkable_users = [u for u in q if u.id not in linked_ids]
     return render_template('riders-list.html',
                            riders=riders,
-                           linkable_users=linkable_users)
+                           linkable_users=linkable_users,
+                           empty_fio_count=empty_fio_count)
 
 
 @app.route('/riders/add', methods=['GET', 'POST'])
@@ -1488,6 +1500,55 @@ def admin_invite(user_id):
         return redirect(url_for('admin_approvals'))
 
     return render_template('admin-invite.html', u=u)
+
+
+# ===== БЫСТРОЕ ЗАПОЛНЕНИЕ ФИО У ТЕНЕВЫХ УЧЁТОК БЕЗ ИМЕНИ =====
+
+@app.route('/admin/fill-names', methods=['GET', 'POST'])
+@login_required
+@admin_required
+def admin_fill_names():
+    """Список пользователей-тренеров/всадников с пустыми ФИО + inline-форма
+    для массового заполнения. Удобно после миграции старой БД, где остались
+    только сгенерированные логины trainer1, rider1 и т.п."""
+    if request.method == 'POST':
+        # Принимаем поля name_<id>, lastname_<id>, phone_<id>
+        updated = 0
+        for key, val in request.form.items():
+            if not (key.startswith('name_') or key.startswith('lastname_')
+                    or key.startswith('phone_')):
+                continue
+            field, _, sid = key.partition('_')
+            if not sid.isdigit():
+                continue
+            u = User.query.get(int(sid))
+            if not u:
+                continue
+            v = (val or '').strip()
+            if field == 'name':
+                u.name = v
+                u.first_name = v
+            elif field == 'lastname':
+                u.lastname = v
+                u.last_name = v
+            elif field == 'phone':
+                u.phone = v
+            updated += 1
+        if updated:
+            db.session.commit()
+        return redirect(url_for('admin_fill_names'))
+
+    # GET: показываем тех, у кого пусто и ФИО, и фамилия.
+    users_empty = (
+        User.query
+        .filter(((User.name.is_(None)) | (User.name == ''))
+                & ((User.lastname.is_(None)) | (User.lastname == '')))
+        .join(Role, User.idrole == Role.id)
+        .filter(Role.role_name.in_(('Trainer', 'Rider')))
+        .order_by(User.id)
+        .all()
+    )
+    return render_template('admin-fill-names.html', users=users_empty)
 
 
 # ===== ПРИВЯЗКА ПОЛЬЗОВАТЕЛЯ ВСАДНИКА К СПИСКУ /riders =====

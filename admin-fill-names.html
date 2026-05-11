@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gardarika | Заполнить ФИО</title>
+    <link rel="icon" type="image/png" href="{{ url_for('static', filename='img/favicon.png') }}">
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --primary: #1B3022; --primary-light: #2C4A3B; --accent: #C5A059;
+            --bg-main: #FBF9F7; --surface: #FFFFFF; --text-main: #1A1A1A;
+            --text-muted: #7A7A7A; --border: #E8E5DF;
+            --shadow: 0 12px 30px rgba(27,48,34,0.06);
+            --radius-lg: 24px; --radius-md: 12px;
+        }
+        * { margin:0; padding:0; box-sizing:border-box; font-family:'Outfit',sans-serif; }
+        body { background:var(--bg-main); color:var(--text-main); min-height:100vh; padding:32px; }
+        .wrap { max-width:1100px; margin:0 auto; }
+        h1 { font-size:28px; color:var(--primary); margin-bottom:6px; font-weight:800; }
+        .sub { color:var(--text-muted); font-size:14px; margin-bottom:24px; line-height:1.6; }
+        .card { background:var(--surface); border-radius:var(--radius-lg); padding:32px; box-shadow:var(--shadow); border:1px solid var(--border); }
+        .empty { color:var(--text-muted); text-align:center; padding:32px; font-size:15px; }
+        table { width:100%; border-collapse:separate; border-spacing:0 12px; }
+        th { font-size:11px; text-transform:uppercase; color:var(--text-muted); letter-spacing:0.6px; text-align:left; padding:4px 12px; font-weight:800; }
+        td { padding:8px 12px; vertical-align:middle; }
+        tr.row { background:var(--bg-main); }
+        tr.row td:first-child { border-radius:var(--radius-md) 0 0 var(--radius-md); }
+        tr.row td:last-child { border-radius:0 var(--radius-md) var(--radius-md) 0; }
+        .role-badge { display:inline-block; padding:2px 8px; border-radius:8px; font-size:10px; font-weight:800; text-transform:uppercase; letter-spacing:0.5px; }
+        .role-Trainer { background:rgba(197,160,89,0.18); color:#8b6a2c; }
+        .role-Rider { background:rgba(27,48,34,0.08); color:var(--primary); }
+        .form-input { width:100%; padding:10px 12px; border:1px solid var(--border); border-radius:var(--radius-md); font-size:13px; background:var(--surface); }
+        .form-input:focus { outline:none; border-color:var(--primary); }
+        .btn-primary { background:var(--primary); color:white; padding:14px 28px; border-radius:var(--radius-md); border:none; cursor:pointer; font-weight:800; font-size:14px; }
+        .btn-primary:hover { background:var(--primary-light); }
+        .btn-secondary { background:transparent; color:var(--text-muted); padding:12px 24px; border-radius:var(--radius-md); border:1px solid var(--border); cursor:pointer; font-weight:700; font-size:13px; text-decoration:none; display:inline-block; }
+        .toolbar { display:flex; gap:12px; justify-content:space-between; align-items:center; margin-top:24px; flex-wrap:wrap; }
+        .hint { background:rgba(197,160,89,0.08); border-radius:var(--radius-md); padding:14px 16px; margin-bottom:20px; font-size:13px; color:var(--primary); }
+    </style>
+</head>
+<body>
+    <div class="wrap">
+        <h1>Заполнить ФИО</h1>
+        <p class="sub">Пользователи, у которых имя и фамилия пустые — поэтому в списках вместо ФИО отображается их логин (<code>trainer1</code>, <code>rider1</code>, …). Заполните значения и нажмите «Сохранить».</p>
+
+        <div class="card">
+            {% if users %}
+            <div class="hint">Найдено записей без ФИО: <b>{{ users|length }}</b>. После сохранения они автоматически исчезнут из этого списка.</div>
+            <form action="/admin/fill-names" method="POST">
+                <table>
+                    <thead>
+                        <tr>
+                            <th style="width:80px">Логин</th>
+                            <th style="width:100px">Роль</th>
+                            <th>Имя</th>
+                            <th>Фамилия</th>
+                            <th>Телефон</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for u in users %}
+                        <tr class="row">
+                            <td><code style="font-size:12px; color:var(--text-muted);">{{ u.username }}</code></td>
+                            <td><span class="role-badge role-{{ u.role.role_name }}">{{ 'Тренер' if u.is_trainer else 'Всадник' }}</span></td>
+                            <td><input type="text" name="name_{{ u.id }}" class="form-input" placeholder="Имя" autocomplete="off"></td>
+                            <td><input type="text" name="lastname_{{ u.id }}" class="form-input" placeholder="Фамилия" autocomplete="off"></td>
+                            <td><input type="text" name="phone_{{ u.id }}" class="form-input" placeholder="+7 (999) 000-00-00" value="{{ u.phone or '' }}" autocomplete="off"></td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+                <div class="toolbar">
+                    <a href="{{ url_for('trainers_list') }}" class="btn-secondary">Назад к тренерам</a>
+                    <button type="submit" class="btn-primary">Сохранить ФИО</button>
+                </div>
+            </form>
+            {% else %}
+            <div class="empty">Все пользователи имеют заполненные ФИО — заполнять нечего.</div>
+            <div style="text-align:center; margin-top:16px;">
+                <a href="{{ url_for('trainers_list') }}" class="btn-secondary">К списку тренеров</a>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+</body>
+</html>
