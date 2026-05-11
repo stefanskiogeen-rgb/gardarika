@@ -1601,17 +1601,28 @@ def riders_link_user():
     user_id = request.form.get('iduser')
     if not user_id:
         return redirect(url_for('riders_list'))
-    u = User.query.get_or_404(int(user_id))
-    if Rider.query.filter_by(iduser=u.id).first():
-        return redirect(url_for('riders_list'))
-    r = Rider(
-        iduser=u.id,
-        subscription_status='Без абонемента (разовые)',
-        subscription_balance=0,
-        rental_balance=0,
-    )
-    db.session.add(r)
-    db.session.commit()
+    try:
+        u = User.query.get_or_404(int(user_id))
+        if Rider.query.filter_by(iduser=u.id).first():
+            return redirect(url_for('riders_list'))
+        # На некоторых старых БД в таблице riders могут оставаться
+        # унаследованные колонки name/lastname/phone с NOT NULL — миграция
+        # их удаляет, но если по каким-то причинам не отработала, вставка
+        # через ORM упадёт. Делаем INSERT через явный SQL только по тем
+        # полям, которые точно есть.
+        db.session.execute(text("""
+            INSERT INTO riders (iduser, subscription_status,
+                                subscription_balance, rental_balance)
+            VALUES (:iduser, :status, 0, 0)
+        """), {
+            "iduser": u.id,
+            "status": 'Без абонемента (разовые)',
+        })
+        db.session.commit()
+    except Exception as e:
+        db.session.rollback()
+        print(f"DEBUG ERROR in riders_link_user: {e}")
+        return f"Ошибка при добавлении в список всадников: {e}", 500
     return redirect(url_for('riders_list'))
 
 # --- ОТЧЁТ ПО ВЫРУЧКЕ КЛУБА (HTML + PDF) ---
