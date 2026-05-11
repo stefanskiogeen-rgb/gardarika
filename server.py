@@ -47,6 +47,11 @@ class User(db.Model):
     email = db.Column(db.String(120), unique=True)
     first_name = db.Column(db.String(100))
     last_name = db.Column(db.String(100))
+    # Новые поля: переехали сюда из trainers / riders, чтобы избежать дублирования
+    name = db.Column(db.String(100))
+    lastname = db.Column(db.String(100))
+    phone = db.Column(db.String(50))
+    is_approved = db.Column(db.Boolean, default=True, nullable=False)
     idrole = db.Column(db.Integer, db.ForeignKey('roles.id'))
     role = db.relationship('Role', backref='users')
 
@@ -58,6 +63,20 @@ class User(db.Model):
     def is_super_admin(self):
         return self.role.role_name == 'SuperAdmin' if self.role else False
 
+    @property
+    def is_trainer(self):
+        return self.role.role_name == 'Trainer' if self.role else False
+
+    @property
+    def is_rider(self):
+        return self.role.role_name == 'Rider' if self.role else False
+
+    @property
+    def full_name(self):
+        parts = [(self.lastname or '').strip(), (self.name or '').strip()]
+        clean = ' '.join(p for p in parts if p)
+        return clean or self.username
+
 class Specialization(db.Model):
     __tablename__ = 'specializations'
     id = db.Column(db.Integer, primary_key=True)
@@ -67,22 +86,35 @@ class Specialization(db.Model):
 class Trainer(db.Model):
     __tablename__ = 'trainers'
     id = db.Column(db.Integer, primary_key=True)
-    name = db.Column(db.String(100), nullable=False)
-    lastname = db.Column(db.String(100))
-    phone = db.Column(db.String(50))
     photo = db.Column(db.String(255))
     iduser = db.Column(db.Integer, db.ForeignKey('users.id'))
     idspecialization = db.Column(db.Integer, db.ForeignKey('specializations.id'))
     user = db.relationship('User', backref='trainer_profile')
     specialization = db.relationship('Specialization', backref='trainers')
 
+    # Имя/фамилия/телефон хранятся в users; здесь — proxy-свойства,
+    # чтобы шаблоны и старый код продолжали работать как раньше.
+    @property
+    def name(self):
+        return self.user.name if self.user else ''
+
+    @property
+    def lastname(self):
+        return self.user.lastname if self.user else ''
+
+    @property
+    def phone(self):
+        return self.user.phone if self.user else ''
+
     @property
     def full_name(self):
-        # We ensure parts are strings and not None
-        p_name = str(self.name or "Тренер")
-        p_last = str(self.lastname or "")
-        parts = [p_last, p_name]
-        return " ".join(filter(None, [p for p in parts if p and p.strip() and p != 'None'])).strip()
+        if not self.user:
+            return "Тренер"
+        return self.user.full_name or "Тренер"
+
+    @property
+    def is_approved(self):
+        return self.user.is_approved if self.user else False
 
     @property
     def spec_name(self):
@@ -92,6 +124,7 @@ class Trainer(db.Model):
         return {
             "id": self.id,
             "name": self.name,
+            "lastname": self.lastname,
             "phone": self.phone,
             "specialization": self.spec_name
         }
@@ -159,10 +192,7 @@ class Horse(db.Model):
 class Rider(db.Model):
     __tablename__ = 'riders'
     id = db.Column(db.Integer, primary_key=True)
-    name = db.Column(db.String(100), nullable=False)
-    lastname = db.Column(db.String(100))
     datebirth = db.Column(db.Date)
-    phone = db.Column(db.String(50))
     subscription_status = db.Column(db.String(255))
     subscription_balance = db.Column(db.Integer, default=0)
     rental_balance = db.Column(db.Integer, default=0)
@@ -170,23 +200,36 @@ class Rider(db.Model):
     photo = db.Column(db.String(255))
     iduser = db.Column(db.Integer, db.ForeignKey('users.id'))
     user = db.relationship('User', backref='rider_profile')
-    
+
+    # Имя/фамилия/телефон теперь живут в users; на Rider — read-only proxy.
+    @property
+    def name(self):
+        return self.user.name if self.user else ''
+
+    @property
+    def lastname(self):
+        return self.user.lastname if self.user else ''
+
+    @property
+    def phone(self):
+        return self.user.phone if self.user else ''
+
     @property
     def status(self):
         return self.subscription_status or "Без абонемента (разовые)"
 
     @property
     def full_name(self):
-        p_name = str(self.name or "Всадник")
-        p_last = str(self.lastname or "")
-        parts = [p_last, p_name]
-        return " ".join(filter(None, [p for p in parts if p and p.strip() and p != 'None'])).strip()
+        if not self.user:
+            return "Всадник"
+        return self.user.full_name or "Всадник"
 
     def to_dict(self):
         try:
             return {
                 "id": self.id,
                 "name": self.name,
+                "lastname": self.lastname,
                 "phone": self.phone or "",
                 "status": self.subscription_status or "Без абонемента (разовые)",
                 "subscription_balance": self.subscription_balance or 0,
@@ -282,27 +325,77 @@ def sync_workout_statuses():
         db.session.rollback()
 
 def login_required(f):
+    """Доступ только авторизованным. Гость считается авторизованным."""
     @wraps(f)
     def decorated_function(*args, **kwargs):
-        if 'username' not in session:
+        if 'username' not in session and not session.get('is_guest'):
             return redirect(url_for('login'))
         return f(*args, **kwargs)
     return decorated_function
+
+
+def admin_required(f):
+    """Только администратор / суперадмин. Возвращает 403 для остальных."""
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if not session.get('is_admin'):
+            return "Отказано", 403
+        return f(*args, **kwargs)
+    return decorated_function
+
+
+def staff_required(f):
+    """Доступ для администратора и тренеров (но не для всадника/гостя)."""
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if not (session.get('is_admin') or session.get('is_trainer')):
+            return "Только для администратора и тренера", 403
+        return f(*args, **kwargs)
+    return decorated_function
+
+
+def non_guest_required(f):
+    """Любые модификации запрещены для гостя."""
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if session.get('is_guest'):
+            return "В режиме гостя доступен только просмотр", 403
+        return f(*args, **kwargs)
+    return decorated_function
+
 
 @app.context_processor
 def inject_user():
     user = None
     is_admin = False
     is_super_admin = False
-    if 'username' in session:
+    is_trainer = False
+    is_rider = False
+    is_guest = bool(session.get('is_guest'))
+
+    if 'username' in session and not is_guest:
         u = User.query.filter_by(username=session['username']).first()
         if u:
             user = u.username
             is_admin = u.is_admin
             is_super_admin = u.is_super_admin
+            is_trainer = u.is_trainer
+            is_rider = u.is_rider
             session['is_admin'] = is_admin
             session['is_super_admin'] = is_super_admin
-    return {'current_user': user, 'is_admin': is_admin, 'is_super_admin': is_super_admin}
+            session['is_trainer'] = is_trainer
+            session['is_rider'] = is_rider
+    elif is_guest:
+        user = 'Гость'
+
+    return {
+        'current_user': user,
+        'is_admin': is_admin,
+        'is_super_admin': is_super_admin,
+        'is_trainer': is_trainer,
+        'is_rider': is_rider,
+        'is_guest': is_guest,
+    }
 
 @app.route('/')
 def index():
@@ -484,39 +577,88 @@ def horses_delete(item_id):
 @app.route('/trainers')
 @login_required
 def trainers_list():
-    return render_template('trainers-list.html', trainers=Trainer.query.all())
+    # Показываем только одобренных тренеров (заявки видны в /admin/approvals)
+    trainers = (Trainer.query
+                .join(User, Trainer.iduser == User.id)
+                .filter(User.is_approved == True)  # noqa: E712
+                .all())
+    return render_template('trainers-list.html', trainers=trainers)
+
+
+def _unique_username(base):
+    """Подбирает свободный username вида <base>, <base>2, <base>3..."""
+    if not base:
+        base = 'user'
+    slug = ''.join(ch for ch in base.lower() if ch.isalnum() or ch == '_')
+    slug = slug or 'user'
+    candidate = slug
+    i = 1
+    while User.query.filter_by(username=candidate).first():
+        i += 1
+        candidate = f"{slug}{i}"
+    return candidate
+
 
 @app.route('/trainers/add', methods=['GET', 'POST'])
 @login_required
+@admin_required
 def trainers_add():
-    if not session.get('is_admin'): return "Отказано", 403
     if request.method == 'POST':
         spec_name = request.form.get('specialization', 'Общая')
         spec = Specialization.query.filter_by(name=spec_name).first() or Specialization(name=spec_name)
-        if not spec.id: db.session.add(spec); db.session.commit()
+        if not spec.id:
+            db.session.add(spec)
+            db.session.commit()
         photo = request.files.get('photo')
         photo_name = ''
         if photo and photo.filename:
             photo_name = str(uuid.uuid4()) + '.' + photo.filename.rsplit('.', 1)[-1]
             photo.save(os.path.join(app.config['UPLOAD_FOLDER'], photo_name))
-        trainer = Trainer(name=request.form.get('name'), lastname=request.form.get('lastname', ''), phone=request.form.get('phone', ''), photo=photo_name, idspecialization=spec.id)
-        db.session.add(trainer); db.session.commit()
+
+        # Создаём User для тренера (имя/фамилия/телефон живут в users)
+        trainer_role = Role.query.filter_by(role_name='Trainer').first()
+        name = request.form.get('name', '').strip()
+        lastname = request.form.get('lastname', '').strip()
+        phone = request.form.get('phone', '').strip()
+        username = _unique_username(name or 'trainer')
+        u = User(
+            username=username,
+            password=generate_password_hash(str(uuid.uuid4()),
+                                            method='pbkdf2:sha256'),
+            name=name, lastname=lastname, phone=phone,
+            first_name=name, last_name=lastname,
+            idrole=trainer_role.id if trainer_role else None,
+            is_approved=True,  # созданного админом сразу публикуем
+        )
+        db.session.add(u)
+        db.session.flush()
+
+        trainer = Trainer(iduser=u.id, photo=photo_name, idspecialization=spec.id)
+        db.session.add(trainer)
+        db.session.commit()
         return redirect(url_for('trainers_list'))
     return render_template('trainers.html')
 
+
 @app.route('/trainers/edit/<int:item_id>', methods=['GET', 'POST'])
 @login_required
+@admin_required
 def trainers_edit(item_id):
-    if not session.get('is_admin'): return "Отказано", 403
     trainer = Trainer.query.get_or_404(item_id)
     if request.method == 'POST':
-        trainer.name = request.form.get('name')
-        trainer.lastname = request.form.get('lastname')
-        trainer.phone = request.form.get('phone')
+        # Имя/фамилия/телефон редактируем у связанного users
+        if trainer.user:
+            trainer.user.name = request.form.get('name')
+            trainer.user.lastname = request.form.get('lastname')
+            trainer.user.phone = request.form.get('phone')
+            trainer.user.first_name = request.form.get('name')
+            trainer.user.last_name = request.form.get('lastname')
         spec_name = request.form.get('specialization')
         if spec_name:
             spec = Specialization.query.filter_by(name=spec_name).first() or Specialization(name=spec_name)
-            if not spec.id: db.session.add(spec); db.session.commit()
+            if not spec.id:
+                db.session.add(spec)
+                db.session.commit()
             trainer.idspecialization = spec.id
         photo = request.files.get('photo')
         if photo and photo.filename:
@@ -525,8 +667,7 @@ def trainers_edit(item_id):
             trainer.photo = photo_name
         db.session.commit()
         return redirect(url_for('trainers_list'))
-    
-    print(f"DEBUG: Handling GET for trainers/edit/{item_id}")
+
     try:
         data = {
             "id": trainer.id,
@@ -535,7 +676,6 @@ def trainers_edit(item_id):
             "phone": trainer.phone or "",
             "specialization": trainer.spec_name
         }
-        print(f"DEBUG: Trainer data success: {data['name']}")
         return render_template('trainers.html', item=data)
     except Exception as e:
         print(f"DEBUG ERROR in trainers_edit: {e}")
@@ -553,12 +693,28 @@ def trainers_delete(item_id):
 @app.route('/riders')
 @login_required
 def riders_list():
-    return render_template('riders-list.html', riders=Rider.query.all())
+    riders = Rider.query.all()
+    # Зарегистрированные всадники, которых ещё не «привязали» к списку.
+    # Их видят только админ и тренер — чтобы добавить в список.
+    linkable_users = []
+    if session.get('is_admin') or session.get('is_trainer'):
+        linked_ids = {r.iduser for r in riders if r.iduser}
+        rider_role = Role.query.filter_by(role_name='Rider').first()
+        if rider_role:
+            q = (User.query
+                 .filter(User.idrole == rider_role.id,
+                         User.is_approved == True)  # noqa: E712
+                 .all())
+            linkable_users = [u for u in q if u.id not in linked_ids]
+    return render_template('riders-list.html',
+                           riders=riders,
+                           linkable_users=linkable_users)
+
 
 @app.route('/riders/add', methods=['GET', 'POST'])
 @login_required
+@admin_required
 def riders_add():
-    if not session.get('is_admin'): return "Отказано", 403
     if request.method == 'POST':
         photo = request.files.get('photo')
         photo_name = ''
@@ -571,27 +727,50 @@ def riders_add():
         except (ValueError, TypeError):
             dob = None
 
+        # Создаём User + Rider (имя/фамилия/телефон — в users)
+        rider_role = Role.query.filter_by(role_name='Rider').first()
+        name = request.form.get('name', '').strip()
+        lastname = request.form.get('lastname', '').strip()
+        phone = request.form.get('phone', '').strip()
+        username = _unique_username(name or 'rider')
+        u = User(
+            username=username,
+            password=generate_password_hash(str(uuid.uuid4()),
+                                            method='pbkdf2:sha256'),
+            name=name, lastname=lastname, phone=phone,
+            first_name=name, last_name=lastname,
+            idrole=rider_role.id if rider_role else None,
+            is_approved=True,
+        )
+        db.session.add(u)
+        db.session.flush()
+
         rider = Rider(
-            name=request.form.get('name'), 
-            phone=request.form.get('phone', ''), 
+            iduser=u.id,
             datebirth=dob,
             subscription_status=request.form.get('status', 'Без абонемента (разовые)'),
             notes=request.form.get('notes', ''),
-            photo=photo_name
+            photo=photo_name,
         )
-        db.session.add(rider); db.session.commit()
+        db.session.add(rider)
+        db.session.commit()
         return redirect(url_for('riders_list'))
     return render_template('riders.html')
 
+
 @app.route('/riders/edit/<int:item_id>', methods=['GET', 'POST'])
 @login_required
+@admin_required
 def riders_edit(item_id):
-    if not session.get('is_admin'): return "Отказано", 403
     rider = Rider.query.get_or_404(item_id)
     if request.method == 'POST':
-        rider.name = request.form.get('name')
-        rider.phone = request.form.get('phone')
-        
+        if rider.user:
+            rider.user.name = request.form.get('name')
+            rider.user.lastname = request.form.get('lastname')
+            rider.user.phone = request.form.get('phone')
+            rider.user.first_name = request.form.get('name')
+            rider.user.last_name = request.form.get('lastname')
+
         dob_str = request.form.get('dob')
         try:
             rider.datebirth = datetime.strptime(dob_str, '%Y-%m-%d').date() if dob_str and dob_str.strip() else None
@@ -607,18 +786,17 @@ def riders_edit(item_id):
             rider.photo = photo_name
         db.session.commit()
         return redirect(url_for('riders_list'))
-    
-    print(f"DEBUG: Handling GET for riders/edit/{item_id}")
+
     try:
         data = {
             "id": rider.id,
             "name": rider.name,
+            "lastname": rider.lastname or "",
             "phone": rider.phone or "",
             "status": rider.subscription_status or "Без абонемента (разовые)",
             "dob": rider.datebirth.strftime('%Y-%m-%d') if rider.datebirth else "",
             "notes": rider.notes or ""
         }
-        print(f"DEBUG: Rider data success: {data['name']}")
         return render_template('riders.html', item=data)
     except Exception as e:
         print(f"DEBUG ERROR in riders_edit: {e}")
@@ -1026,33 +1204,262 @@ def _inflect_lessons(n):
 # --- AUTH TEMPLATES AS STRINGS ---
 CSS_STYLE = """<link rel="icon" type="image/png" href="/static/img/favicon.png"><meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"><style>:root { --primary: #2C4A3B; --primary-light: #4A7059; --bg-color: #F4F7F6; --surface: #FFFFFF; --text-main: #1F2937; --text-muted: #6B7280; --border: #E5E7EB; --accent: #D4AF37; } * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Inter', sans-serif; } body { background-color: var(--bg-color); color: var(--text-main); display: flex; align-items: center; justify-content: center; height: 100vh; } .auth-container { background: var(--surface); padding: 40px; border-radius: 16px; border: 1px solid var(--border); box-shadow: 0 4px 6px -1px rgba(0,0,0,0.02); width: 100%; max-width: 420px; } .auth-title { font-size: 24px; font-weight: 600; margin-bottom: 24px; text-align: center; color: var(--text-main); } .logo { font-size: 20px; font-weight: 700; color: var(--primary); margin-bottom: 24px; display: flex; justify-content: center; align-items: center; gap: 12px; letter-spacing: 0.5px; text-transform: uppercase; text-decoration: none; } .logo img { width: 36px; height: 36px; object-fit: contain; border-radius: 8px; } .form-group { margin-bottom: 16px; } .form-group label { display: block; font-size: 13px; font-weight: 500; color: var(--text-muted); margin-bottom: 6px; } .form-group input { width: 100%; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; font-size: 14px; outline: none; transition: border-color 0.2s; } .form-group input:focus { border-color: var(--primary); } .btn-primary { background-color: var(--primary); color: white; padding: 12px; border-radius: 8px; font-size: 14px; font-weight: 500; border: none; cursor: pointer; width: 100%; margin-top: 8px; transition: background-color 0.2s; } .btn-primary:hover { background-color: var(--primary-light); } .alert { padding: 12px; border-radius: 8px; margin-bottom: 16px; font-size: 13px; font-weight: 500; } .alert-error { background-color: #FEE2E2; color: #991B1B; border: 1px solid #FCA5A5; }</style>"""
 
+def _auth_layout(title, body_html, error_html=''):
+    """Универсальная обёртка для страниц /login и /register."""
+    return render_template_string(
+        f"""<!DOCTYPE html><html><head>{CSS_STYLE}</head>
+        <body><div class='auth-container'>
+            <div class='logo'><img src='/static/img/logo.png' alt='Logo'><span>Гардарика</span></div>
+            <h1 class='auth-title'>{title}</h1>
+            {error_html}
+            {body_html}
+        </div></body></html>""")
+
+
+def _login_form_html():
+    return ("""
+        <form method='POST'>
+            <div class='form-group'><label>Логин</label>
+                <input type='text' name='username' required></div>
+            <div class='form-group'><label>Пароль</label>
+                <input type='password' name='password' required></div>
+            <button type='submit' class='btn-primary'>Войти</button>
+        </form>
+        <form method='POST' action='/login/guest' style='margin-top:12px;'>
+            <button type='submit' class='btn-primary' style='background:var(--accent);'>
+                Войти как гость
+            </button>
+        </form>
+        <div style='text-align:center;margin-top:20px;'>
+            <a href='/register' style='color:var(--primary);text-decoration:none;font-size:14px;'>
+                Нет аккаунта? Зарегистрироваться
+            </a>
+        </div>""")
+
+
+def _register_form_html(values=None):
+    v = values or {}
+    return f"""
+        <form method='POST' id='regForm'>
+            <div class='form-group'><label>Логин</label>
+                <input type='text' name='username' value='{v.get("username","")}' required></div>
+            <div class='form-group'><label>Пароль</label>
+                <input type='password' name='password' required></div>
+            <div class='form-group'><label>Имя</label>
+                <input type='text' name='name' value='{v.get("name","")}' required></div>
+            <div class='form-group'><label>Фамилия</label>
+                <input type='text' name='lastname' value='{v.get("lastname","")}'></div>
+            <div class='form-group'><label>Телефон</label>
+                <input type='text' name='phone' value='{v.get("phone","")}'
+                       placeholder='+7 (999) 000-00-00'></div>
+            <div class='form-group'>
+                <label style='display:block;margin-bottom:8px;'>Я регистрируюсь как:</label>
+                <label style='display:block;margin-bottom:6px;font-weight:400;color:var(--text-main);'>
+                    <input type='radio' name='role' value='Rider' checked
+                           onchange='document.getElementById("specBlock").style.display="none"'>
+                    Всадник <span style='color:var(--text-muted);font-size:12px;'>
+                    (доступ сразу после регистрации)</span>
+                </label>
+                <label style='display:block;font-weight:400;color:var(--text-main);'>
+                    <input type='radio' name='role' value='Trainer'
+                           onchange='document.getElementById("specBlock").style.display="block"'>
+                    Тренер <span style='color:var(--text-muted);font-size:12px;'>
+                    (после одобрения администратора)</span>
+                </label>
+            </div>
+            <div class='form-group' id='specBlock' style='display:none;'>
+                <label>Специализация</label>
+                <input type='text' name='specialization'
+                       value='{v.get("specialization","")}'
+                       placeholder='Например: Выездка, Конкур, Иппотерапия'>
+            </div>
+            <button type='submit' class='btn-primary'>Зарегистрироваться</button>
+        </form>
+        <div style='text-align:center;margin-top:20px;'>
+            <a href='/login' style='color:var(--primary);text-decoration:none;font-size:14px;'>
+                Уже есть аккаунт? Войти
+            </a>
+        </div>"""
+
+
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     if request.method == 'POST':
-        u = User.query.filter_by(username=request.form.get('username')).first()
-        if u and check_password_hash(u.password, request.form.get('password')):
-            session['username'] = u.username
-            return redirect(url_for('dashboard_view'))
-        return render_template_string(f"<!DOCTYPE html><html><head>{CSS_STYLE}</head><body><div class='auth-container'><div class='logo'><img src='/static/img/logo.png' alt='Logo'><span>Гардарика</span></div><h1 class='auth-title'>Вход</h1><div class='alert alert-error'>Неверные данные</div><form method='POST'><div class='form-group'><label>Логин</label><input type='text' name='username' required></div><div class='form-group'><label>Пароль</label><input type='password' name='password' required></div><button type='submit' class='btn-primary'>Войти</button></form><div style='text-align:center;margin-top:20px;'><a href='/register' style='color:var(--primary);text-decoration:none;font-size:14px;'>Нет аккаунта? Зарегистрироваться</a></div></div></body></html>")
-    return render_template_string(f"<!DOCTYPE html><html><head>{CSS_STYLE}</head><body><div class='auth-container'><div class='logo'><img src='/static/img/logo.png' alt='Logo'><span>Гардарика</span></div><h1 class='auth-title'>Вход</h1><form method='POST'><div class='form-group'><label>Логин</label><input type='text' name='username' required></div><div class='form-group'><label>Пароль</label><input type='password' name='password' required></div><button type='submit' class='btn-primary'>Войти</button></form><div style='text-align:center;margin-top:20px;'><a href='/register' style='color:var(--primary);text-decoration:none;font-size:14px;'>Нет аккаунта? Зарегистрироваться</a></div></div></body></html>")
+        username = (request.form.get('username') or '').strip()
+        password = request.form.get('password') or ''
+        u = User.query.filter_by(username=username).first()
+        if not u or not check_password_hash(u.password, password):
+            return _auth_layout(
+                'Вход', _login_form_html(),
+                "<div class='alert alert-error'>Неверный логин или пароль</div>")
+        if not u.is_approved:
+            return _auth_layout(
+                'Вход', _login_form_html(),
+                "<div class='alert alert-error'>Ваша учётная запись "
+                "ожидает одобрения администратора.</div>")
+        session.clear()
+        session['username'] = u.username
+        session['is_guest'] = False
+        return redirect(url_for('dashboard_view'))
+    return _auth_layout('Вход', _login_form_html())
+
+
+@app.route('/login/guest', methods=['POST'])
+def login_guest():
+    """Вход в режиме гостя: read-only сессия, без записи в БД."""
+    session.clear()
+    session['is_guest'] = True
+    session['is_admin'] = False
+    session['is_super_admin'] = False
+    session['is_trainer'] = False
+    session['is_rider'] = False
+    return redirect(url_for('dashboard_view'))
+
 
 @app.route('/register', methods=['GET', 'POST'])
 def register():
     if request.method == 'POST':
-        username = request.form.get('username')
-        password = request.form.get('password')
+        username = (request.form.get('username') or '').strip()
+        password = request.form.get('password') or ''
+        name = (request.form.get('name') or '').strip()
+        lastname = (request.form.get('lastname') or '').strip()
+        phone = (request.form.get('phone') or '').strip()
+        role_pick = request.form.get('role', 'Rider')
+        spec_name = (request.form.get('specialization') or '').strip()
+
+        form_values = {
+            'username': username, 'name': name, 'lastname': lastname,
+            'phone': phone, 'specialization': spec_name,
+        }
+
+        if not username or not password or not name:
+            return _auth_layout(
+                'Регистрация', _register_form_html(form_values),
+                "<div class='alert alert-error'>Заполните логин, пароль и имя</div>")
+
         if User.query.filter_by(username=username).first():
-            return render_template_string(f"<!DOCTYPE html><html><head>{CSS_STYLE}</head><body><div class='auth-container'><div class='logo'><img src='/static/img/logo.png' alt='Logo'><span>Гардарика</span></div><h1 class='auth-title'>Регистрация</h1><div class='alert alert-error'>Логин занят</div><form method='POST'><div class='form-group'><label>Логин</label><input type='text' name='username' required></div><div class='form-group'><label>Пароль</label><input type='password' name='password' required></div><button type='submit' class='btn-primary'>Зарегистрироваться</button></form><div style='text-align:center;margin-top:20px;'><a href='/login' style='color:var(--primary);text-decoration:none;font-size:14px;'>Уже есть аккаунт? Войти</a></div></div></body></html>")
-        
-        rider_role = Role.query.filter_by(role_name='Rider').first()
-        u = User(username=username,
-                 password=generate_password_hash(password, method='pbkdf2:sha256'),
-                 idrole=rider_role.id)
+            return _auth_layout(
+                'Регистрация', _register_form_html(form_values),
+                "<div class='alert alert-error'>Логин занят</div>")
+
+        if role_pick not in ('Rider', 'Trainer'):
+            role_pick = 'Rider'
+
+        role = Role.query.filter_by(role_name=role_pick).first()
+        if not role:
+            return _auth_layout(
+                'Регистрация', _register_form_html(form_values),
+                "<div class='alert alert-error'>Роль не найдена</div>")
+
+        is_approved = (role_pick == 'Rider')
+
+        u = User(
+            username=username,
+            password=generate_password_hash(password, method='pbkdf2:sha256'),
+            name=name, lastname=lastname, phone=phone,
+            first_name=name, last_name=lastname,
+            idrole=role.id, is_approved=is_approved,
+        )
         db.session.add(u)
+        db.session.flush()
+
+        # Тренер: создаём профиль сразу, но скрытый до одобрения.
+        if role_pick == 'Trainer':
+            spec = None
+            if spec_name:
+                spec = (Specialization.query.filter_by(name=spec_name).first()
+                        or Specialization(name=spec_name))
+                if not spec.id:
+                    db.session.add(spec)
+                    db.session.flush()
+            db.session.add(Trainer(iduser=u.id,
+                                   idspecialization=spec.id if spec else None))
+
+        # Всадник: профиль в `riders` НЕ создаётся.
+        # Запись там появится только когда тренер/админ
+        # «привяжет» этого пользователя к списку всадников.
+
         db.session.commit()
+
+        if not is_approved:
+            return _auth_layout(
+                'Регистрация',
+                "<div style='text-align:center;line-height:1.6;'>"
+                "<p style='font-size:15px;color:var(--text-main);margin-bottom:18px;'>"
+                "Заявка тренера отправлена на рассмотрение.<br>"
+                "Дождитесь подтверждения администратора.</p>"
+                "<a href='/login' class='btn-primary' style='display:inline-block;"
+                "text-decoration:none;padding:10px 24px;'>На страницу входа</a>"
+                "</div>")
+
+        session.clear()
         session['username'] = username
+        session['is_guest'] = False
         return redirect(url_for('dashboard_view'))
-    return render_template_string(f"<!DOCTYPE html><html><head>{CSS_STYLE}</head><body><div class='auth-container'><div class='logo'><img src='/static/img/logo.png' alt='Logo'><span>Гардарика</span></div><h1 class='auth-title'>Регистрация</h1><form method='POST'><div class='form-group'><label>Логин</label><input type='text' name='username' required></div><div class='form-group'><label>Пароль</label><input type='password' name='password' required></div><button type='submit' class='btn-primary'>Зарегистрироваться</button></form><div style='text-align:center;margin-top:20px;'><a href='/login' style='color:var(--primary);text-decoration:none;font-size:14px;'>Уже есть аккаунт? Войти</a></div></div></body></html>")
+
+    return _auth_layout('Регистрация', _register_form_html())
+
+
+# ===== АДМИН: ОДОБРЕНИЕ ЗАЯВОК =====
+
+@app.route('/admin/approvals')
+@login_required
+@admin_required
+def admin_approvals():
+    """Список незодобренных пользователей (в основном — тренеры)."""
+    pending = (User.query
+               .filter(User.is_approved == False)  # noqa: E712
+               .order_by(User.id.desc()).all())
+    return render_template('admin-approvals.html', pending=pending)
+
+
+@app.route('/admin/approve/<int:user_id>', methods=['POST'])
+@login_required
+@admin_required
+def admin_approve(user_id):
+    u = User.query.get_or_404(user_id)
+    u.is_approved = True
+    db.session.commit()
+    return redirect(url_for('admin_approvals'))
+
+
+@app.route('/admin/reject/<int:user_id>', methods=['POST'])
+@login_required
+@admin_required
+def admin_reject(user_id):
+    u = User.query.get_or_404(user_id)
+    if u.is_super_admin:
+        return "Нельзя удалить суперадмина", 403
+    # Каскадно убираем связанные профили (на случай неодобренного тренера)
+    Trainer.query.filter_by(iduser=u.id).delete()
+    Rider.query.filter_by(iduser=u.id).delete()
+    db.session.delete(u)
+    db.session.commit()
+    return redirect(url_for('admin_approvals'))
+
+
+# ===== ПРИВЯЗКА ПОЛЬЗОВАТЕЛЯ ВСАДНИКА К СПИСКУ /riders =====
+
+@app.route('/riders/link_user', methods=['POST'])
+@login_required
+@staff_required
+def riders_link_user():
+    """Создаёт запись riders для уже зарегистрированного пользователя-всадника."""
+    user_id = request.form.get('iduser')
+    if not user_id:
+        return redirect(url_for('riders_list'))
+    u = User.query.get_or_404(int(user_id))
+    if Rider.query.filter_by(iduser=u.id).first():
+        return redirect(url_for('riders_list'))
+    r = Rider(
+        iduser=u.id,
+        subscription_status='Без абонемента (разовые)',
+        subscription_balance=0,
+        rental_balance=0,
+    )
+    db.session.add(r)
+    db.session.commit()
+    return redirect(url_for('riders_list'))
 
 # --- ОТЧЁТ ПО ВЫРУЧКЕ КЛУБА (HTML + PDF) ---
 
@@ -1301,17 +1708,161 @@ def revenue_report_pdf():
     )
 
 
+def _migrate_user_profile_fields(is_postgres):
+    """Однократная миграция: переносит name/lastname/phone из trainers/riders
+    в users и удаляет старые колонки. Безопасно перезапускается."""
+    try:
+        # 1. Добавляем колонки в users (если их ещё нет)
+        if is_postgres:
+            db.session.execute(text(
+                "ALTER TABLE users "
+                "ADD COLUMN IF NOT EXISTS name VARCHAR(100), "
+                "ADD COLUMN IF NOT EXISTS lastname VARCHAR(100), "
+                "ADD COLUMN IF NOT EXISTS phone VARCHAR(50), "
+                "ADD COLUMN IF NOT EXISTS is_approved BOOLEAN DEFAULT TRUE NOT NULL;"
+            ))
+            db.session.commit()
+        # На SQLite db.create_all() уже создал нужные колонки.
+
+        # 2. Переносим имена существующих тренеров в users (если нужно)
+        if is_postgres:
+            trainer_has_name = db.session.execute(text(
+                "SELECT column_name FROM information_schema.columns "
+                "WHERE table_name='trainers' AND column_name='name'"
+            )).fetchone() is not None
+
+            if trainer_has_name:
+                # Для тренеров без iduser создаём «теневой» User
+                orphans = db.session.execute(text(
+                    "SELECT id, name, lastname, phone FROM trainers WHERE iduser IS NULL"
+                )).fetchall()
+                trainer_role = Role.query.filter_by(role_name='Trainer').first()
+                for row in orphans:
+                    base = (row.name or 'trainer').lower()
+                    base = ''.join(ch for ch in base if ch.isalnum() or ch == '_') or 'trainer'
+                    candidate = base
+                    i = 1
+                    while db.session.execute(
+                        text("SELECT 1 FROM users WHERE username=:u"),
+                        {"u": candidate}).fetchone():
+                        i += 1
+                        candidate = f"{base}{i}"
+                    pw = generate_password_hash(str(uuid.uuid4()),
+                                                method='pbkdf2:sha256')
+                    db.session.execute(text(
+                        "INSERT INTO users(username, password, name, lastname, "
+                        "phone, first_name, last_name, idrole, is_approved) "
+                        "VALUES (:u,:p,:n,:l,:ph,:n,:l,:r,TRUE) RETURNING id"
+                    ), {
+                        "u": candidate, "p": pw, "n": row.name or '',
+                        "l": row.lastname or '', "ph": row.phone or '',
+                        "r": trainer_role.id if trainer_role else None,
+                    })
+                    new_uid = db.session.execute(text(
+                        "SELECT id FROM users WHERE username=:u"),
+                        {"u": candidate}).scalar()
+                    db.session.execute(text(
+                        "UPDATE trainers SET iduser=:uid WHERE id=:tid"),
+                        {"uid": new_uid, "tid": row.id})
+
+                # Копируем имя/фамилию/телефон у тренеров с iduser
+                db.session.execute(text("""
+                    UPDATE users u
+                    SET name = COALESCE(NULLIF(u.name, ''), t.name),
+                        lastname = COALESCE(NULLIF(u.lastname, ''), t.lastname),
+                        phone = COALESCE(NULLIF(u.phone, ''), t.phone),
+                        first_name = COALESCE(NULLIF(u.first_name, ''), t.name),
+                        last_name = COALESCE(NULLIF(u.last_name, ''), t.lastname)
+                    FROM trainers t
+                    WHERE t.iduser = u.id
+                """))
+                db.session.execute(text(
+                    "ALTER TABLE trainers DROP COLUMN IF EXISTS name, "
+                    "DROP COLUMN IF EXISTS lastname, "
+                    "DROP COLUMN IF EXISTS phone;"))
+                db.session.commit()
+
+            rider_has_name = db.session.execute(text(
+                "SELECT column_name FROM information_schema.columns "
+                "WHERE table_name='riders' AND column_name='name'"
+            )).fetchone() is not None
+
+            if rider_has_name:
+                orphans = db.session.execute(text(
+                    "SELECT id, name, lastname, phone FROM riders WHERE iduser IS NULL"
+                )).fetchall()
+                rider_role = Role.query.filter_by(role_name='Rider').first()
+                for row in orphans:
+                    base = (row.name or 'rider').lower()
+                    base = ''.join(ch for ch in base if ch.isalnum() or ch == '_') or 'rider'
+                    candidate = base
+                    i = 1
+                    while db.session.execute(
+                        text("SELECT 1 FROM users WHERE username=:u"),
+                        {"u": candidate}).fetchone():
+                        i += 1
+                        candidate = f"{base}{i}"
+                    pw = generate_password_hash(str(uuid.uuid4()),
+                                                method='pbkdf2:sha256')
+                    db.session.execute(text(
+                        "INSERT INTO users(username, password, name, lastname, "
+                        "phone, first_name, last_name, idrole, is_approved) "
+                        "VALUES (:u,:p,:n,:l,:ph,:n,:l,:r,TRUE) RETURNING id"
+                    ), {
+                        "u": candidate, "p": pw, "n": row.name or '',
+                        "l": row.lastname or '', "ph": row.phone or '',
+                        "r": rider_role.id if rider_role else None,
+                    })
+                    new_uid = db.session.execute(text(
+                        "SELECT id FROM users WHERE username=:u"),
+                        {"u": candidate}).scalar()
+                    db.session.execute(text(
+                        "UPDATE riders SET iduser=:uid WHERE id=:rid"),
+                        {"uid": new_uid, "rid": row.id})
+
+                db.session.execute(text("""
+                    UPDATE users u
+                    SET name = COALESCE(NULLIF(u.name, ''), r.name),
+                        lastname = COALESCE(NULLIF(u.lastname, ''), r.lastname),
+                        phone = COALESCE(NULLIF(u.phone, ''), r.phone),
+                        first_name = COALESCE(NULLIF(u.first_name, ''), r.name),
+                        last_name = COALESCE(NULLIF(u.last_name, ''), r.lastname)
+                    FROM riders r
+                    WHERE r.iduser = u.id
+                """))
+                db.session.execute(text(
+                    "ALTER TABLE riders DROP COLUMN IF EXISTS name, "
+                    "DROP COLUMN IF EXISTS lastname, "
+                    "DROP COLUMN IF EXISTS phone;"))
+                db.session.commit()
+        print("Profile field migration completed.")
+    except Exception as e:
+        print(f"WARN: profile field migration failed (likely already done): {e}")
+        db.session.rollback()
+
+
 def initialize_database():
     with app.app_context():
         # Определяем тип базы данных
         is_postgres = 'postgresql' in app.config['SQLALCHEMY_DATABASE_URI']
-        
+
         # 1. Создаем таблицы (если их нет)
         db.create_all()
 
+        # 2. Миграция полей name/lastname/phone из trainers/riders в users
+        _migrate_user_profile_fields(is_postgres)
+
         # 3. Сид ролей
         if not Role.query.first():
-            db.session.add_all([Role(role_name=n) for n in ["SuperAdmin", "Admin", "Trainer", "Rider"]])
+            db.session.add_all([
+                Role(role_name=n)
+                for n in ["SuperAdmin", "Admin", "Trainer", "Rider", "Guest"]])
+            db.session.commit()
+        else:
+            # Дополняем недостающие
+            for n in ("SuperAdmin", "Admin", "Trainer", "Rider", "Guest"):
+                if not Role.query.filter_by(role_name=n).first():
+                    db.session.add(Role(role_name=n))
             db.session.commit()
 
         # 4. Создаем представление статистики
@@ -1445,18 +1996,58 @@ def initialize_database():
                 print(f"Failed to initialize database triggers/functions: {e}")
                 db.session.rollback()
 
-        # 6. Представление для активных абонементов
+        # 6. Представление для активных абонементов (имена теперь из users)
         try:
             db.session.execute(text("DROP VIEW IF EXISTS v_rider_active_subscriptions CASCADE;"))
             db.session.execute(text("""
                 CREATE VIEW v_rider_active_subscriptions AS
-                SELECT id, name, subscription_balance, rental_balance, subscription_status
-                FROM riders
-                WHERE COALESCE(subscription_balance, 0) > 0 OR COALESCE(rental_balance, 0) > 0;
+                SELECT r.id,
+                       COALESCE(u.name, '') AS name,
+                       COALESCE(u.lastname, '') AS lastname,
+                       r.subscription_balance,
+                       r.rental_balance,
+                       r.subscription_status
+                FROM riders r
+                LEFT JOIN users u ON u.id = r.iduser
+                WHERE COALESCE(r.subscription_balance, 0) > 0
+                   OR COALESCE(r.rental_balance, 0) > 0;
             """))
             db.session.commit()
         except Exception as e:
             print(f"Failed to create view v_rider_active_subscriptions: {e}")
+
+        # 7. Представление v_full_schedule (имена тоже из users)
+        if is_postgres:
+            try:
+                db.session.execute(text("DROP VIEW IF EXISTS v_full_schedule CASCADE;"))
+                db.session.execute(text("""
+                    CREATE VIEW v_full_schedule AS
+                    SELECT
+                        w.id AS workout_id,
+                        w.datetime_start AS "Дата и время",
+                        COALESCE(
+                            ur.lastname || ' ' || ur.name,
+                            wp.guest_name,
+                            'Не назначен'
+                        ) AS "Всадник",
+                        COALESCE(ut.lastname || ' ' || ut.name, 'Без тренера') AS "Тренер",
+                        COALESCE(h.name, 'Не выбрана') AS "Лошадь",
+                        COALESCE(s.name, 'Не указана') AS "Услуга",
+                        w.status AS "Статус"
+                    FROM workouts w
+                    LEFT JOIN workout_participants wp ON wp.idworkout = w.id
+                    LEFT JOIN riders r ON wp.idrider = r.id
+                    LEFT JOIN users ur ON ur.id = r.iduser
+                    LEFT JOIN trainers t ON w.idtrainer = t.id
+                    LEFT JOIN users ut ON ut.id = t.iduser
+                    LEFT JOIN horses h ON wp.idhorse = h.id
+                    LEFT JOIN services s ON w.idservice = s.id
+                    ORDER BY w.datetime_start;
+                """))
+                db.session.commit()
+            except Exception as e:
+                print(f"Failed to create view v_full_schedule: {e}")
+                db.session.rollback()
 
 # Инициализация при запуске (только для главного процесса или прямого запуска)
 if os.environ.get('GUNICORN_MAIN') == '1' or __name__ == '__main__':

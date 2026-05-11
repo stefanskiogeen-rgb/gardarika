@@ -514,6 +514,9 @@
             <a href="/trainers" class="nav-item {{'active' if 'trainers' in request.path}}">🎓 Тренеры</a>
             <a href="/services" class="nav-item {{'active' if 'services' in request.path}}">💰 Услуги</a>
             <a href="/reports/revenue" class="nav-item {{'active' if 'reports/revenue' in request.path}}">📈 Отчёт по выручке</a>
+            {% if is_admin %}
+            <a href="/admin/approvals" class="nav-item {{'active' if 'admin/approvals' in request.path}}">📝 Заявки</a>
+            {% endif %}
             {% if is_super_admin %}
             <a href="/admin/users" class="nav-item {{'active' if 'admin/users' in request.path}}">⚙️ Админ-панель</a>
             {% endif %}
@@ -523,6 +526,9 @@
         <a href="/horses" class="menu-drawer-item">🐎 Лошади</a>
         <a href="/trainers" class="menu-drawer-item">🎓 Тренеры</a>
         <a href="/services" class="menu-drawer-item">💰 Услуги</a>
+        {% if is_admin %}
+        <a href="/admin/approvals" class="menu-drawer-item">📝 Заявки</a>
+        {% endif %}
         {% if is_super_admin %}
         <a href="/admin/users" class="menu-drawer-item">⚙️ Админ-панель</a>
         {% endif %}

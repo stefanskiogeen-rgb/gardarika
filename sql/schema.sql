@@ -42,7 +42,8 @@ CREATE TABLE roles (
 COMMENT ON TABLE  roles            IS 'Роли пользователей системы';
 COMMENT ON COLUMN roles.role_name  IS 'Наименование роли (SuperAdmin, Admin, Trainer, Rider)';
 
--- Учётные записи пользователей
+-- Учётные записи пользователей (демографические поля живут здесь;
+-- в trainers/riders они НЕ дублируются — доступ идёт через FK iduser).
 CREATE TABLE users (
     id          SERIAL PRIMARY KEY,
     username    VARCHAR(100) UNIQUE NOT NULL,
@@ -50,11 +51,19 @@ CREATE TABLE users (
     email       VARCHAR(120) UNIQUE,
     first_name  VARCHAR(100),
     last_name   VARCHAR(100),
+    name        VARCHAR(100),
+    lastname    VARCHAR(100),
+    phone       VARCHAR(50),
+    is_approved BOOLEAN NOT NULL DEFAULT TRUE,
     idrole      INTEGER REFERENCES roles(id) ON DELETE SET NULL
 );
 
-COMMENT ON TABLE  users            IS 'Учётные записи пользователей информационной системы';
-COMMENT ON COLUMN users.password   IS 'Хеш пароля (PBKDF2-SHA256)';
+COMMENT ON TABLE  users             IS 'Учётные записи пользователей информационной системы';
+COMMENT ON COLUMN users.password    IS 'Хеш пароля (PBKDF2-SHA256)';
+COMMENT ON COLUMN users.name        IS 'Имя (используется в карточках Тренер/Всадник через iduser)';
+COMMENT ON COLUMN users.lastname    IS 'Фамилия (используется в карточках Тренер/Всадник через iduser)';
+COMMENT ON COLUMN users.phone       IS 'Телефон для связи';
+COMMENT ON COLUMN users.is_approved IS 'Тренеры — FALSE до одобрения админом; всадники — всегда TRUE';
 
 -- Справочник специализаций тренеров
 CREATE TABLE specializations (
@@ -64,18 +73,16 @@ CREATE TABLE specializations (
 
 COMMENT ON TABLE specializations IS 'Специализации тренеров (выездка, конкур, иппотерапия и т. п.)';
 
--- Тренеры
+-- Тренеры (имя/фамилия/телефон тренера лежат в users — берутся через iduser).
 CREATE TABLE trainers (
     id                SERIAL PRIMARY KEY,
-    name              VARCHAR(100) NOT NULL,
-    lastname          VARCHAR(100),
-    phone             VARCHAR(50),
     photo             VARCHAR(255),
     iduser            INTEGER REFERENCES users(id)            ON DELETE SET NULL,
     idspecialization  INTEGER REFERENCES specializations(id)  ON DELETE SET NULL
 );
 
-COMMENT ON TABLE trainers IS 'Тренеры конноспортивного клуба';
+COMMENT ON TABLE  trainers        IS 'Тренеры конноспортивного клуба';
+COMMENT ON COLUMN trainers.iduser IS 'FK на users — оттуда берутся ФИО и телефон';
 
 -- Справочник пород лошадей
 CREATE TABLE breeds (
@@ -101,13 +108,10 @@ CREATE TABLE horses (
 
 COMMENT ON TABLE horses IS 'Поголовье лошадей конноспортивного клуба';
 
--- Наездники (клиенты клуба)
+-- Наездники (клиенты клуба) — ФИО/телефон хранятся в users.
 CREATE TABLE riders (
     id                    SERIAL PRIMARY KEY,
-    name                  VARCHAR(100) NOT NULL,
-    lastname              VARCHAR(100),
     datebirth             DATE,
-    phone                 VARCHAR(50),
     subscription_status   VARCHAR(255),
     subscription_balance  INTEGER DEFAULT 0,
     rental_balance        INTEGER DEFAULT 0,
@@ -118,7 +122,8 @@ CREATE TABLE riders (
     CONSTRAINT ck_riders_rental_nonneg       CHECK (rental_balance       >= 0)
 );
 
-COMMENT ON TABLE riders IS 'Наездники — клиенты конноспортивного клуба';
+COMMENT ON TABLE  riders        IS 'Наездники — клиенты конноспортивного клуба';
+COMMENT ON COLUMN riders.iduser IS 'FK на users — оттуда берутся ФИО и телефон';
 
 -- Услуги
 CREATE TABLE services (

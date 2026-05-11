@@ -4,13 +4,32 @@
 -- за период март–май 2025 г., чтобы представления и запросы возвращали данные.
 
 
--- 1. Тренеры (ссылаются на справочник specializations из schema.sql)
-INSERT INTO trainers (name, lastname, phone, idspecialization) VALUES
-    ('Анна',     'Кузнецова', '+7-911-101-22-33', 1),
-    ('Иван',     'Петров',    '+7-911-202-33-44', 2),
-    ('Ольга',    'Соколова',  '+7-911-303-44-55', 3),
-    ('Дмитрий',  'Морозов',   '+7-911-404-55-66', 4),
-    ('Екатерина','Новикова',  '+7-911-505-66-77', 5);
+-- 1. Тренеры: создаём учётные записи в users (имя/фамилия/телефон живут там),
+--    а затем — связанные строки в trainers с iduser.
+WITH ins_users AS (
+    INSERT INTO users (username, password, name, lastname, phone, idrole, is_approved)
+    VALUES
+        ('t_kuznetsova', 'PLACEHOLDER', 'Анна',     'Кузнецова', '+7-911-101-22-33',
+            (SELECT id FROM roles WHERE role_name='Trainer'), TRUE),
+        ('t_petrov',     'PLACEHOLDER', 'Иван',     'Петров',    '+7-911-202-33-44',
+            (SELECT id FROM roles WHERE role_name='Trainer'), TRUE),
+        ('t_sokolova',   'PLACEHOLDER', 'Ольга',    'Соколова',  '+7-911-303-44-55',
+            (SELECT id FROM roles WHERE role_name='Trainer'), TRUE),
+        ('t_morozov',    'PLACEHOLDER', 'Дмитрий',  'Морозов',   '+7-911-404-55-66',
+            (SELECT id FROM roles WHERE role_name='Trainer'), TRUE),
+        ('t_novikova',   'PLACEHOLDER', 'Екатерина','Новикова',  '+7-911-505-66-77',
+            (SELECT id FROM roles WHERE role_name='Trainer'), TRUE)
+    RETURNING id, username
+)
+INSERT INTO trainers (iduser, idspecialization)
+SELECT id, CASE username
+            WHEN 't_kuznetsova' THEN 1
+            WHEN 't_petrov'     THEN 2
+            WHEN 't_sokolova'   THEN 3
+            WHEN 't_morozov'    THEN 4
+            WHEN 't_novikova'   THEN 5
+          END
+FROM ins_users;
 
 
 -- 2. Лошади (ссылаются на справочник breeds из schema.sql)
@@ -24,16 +43,56 @@ INSERT INTO horses (name, status, birth_year, color, gender, idbreed) VALUES
     ('Орлица',  'active', 2013, 'Гнедая',     'кобыла',  6);
 
 
--- 3. Всадники (клиенты клуба)
-INSERT INTO riders (name, lastname, datebirth, phone,
-                    subscription_status, subscription_balance, rental_balance) VALUES
-    ('Мария',    'Иванова',   '1995-03-12', '+7-921-111-11-11', 'active', 8, 0),
-    ('Алексей',  'Сидоров',   '1990-07-23', '+7-921-222-22-22', 'active', 5, 2),
-    ('Елена',    'Волкова',   '2002-11-04', '+7-921-333-33-33', 'active', 6, 0),
-    ('Никита',   'Григорьев', '1998-01-30', '+7-921-444-44-44', 'paused', 0, 4),
-    ('Татьяна',  'Лебедева',  '1985-09-15', '+7-921-555-55-55', 'active', 3, 1),
-    ('Сергей',   'Васильев',  '1992-05-08', '+7-921-666-66-66', 'active', 7, 0),
-    ('Юлия',     'Орлова',    '2000-12-19', '+7-921-777-77-77', 'active', 4, 2);
+-- 3. Всадники: имя/фамилия/телефон тоже идут в users.
+WITH ins_users AS (
+    INSERT INTO users (username, password, name, lastname, phone, idrole, is_approved)
+    VALUES
+        ('r_ivanova',    'PLACEHOLDER', 'Мария',   'Иванова',   '+7-921-111-11-11',
+            (SELECT id FROM roles WHERE role_name='Rider'), TRUE),
+        ('r_sidorov',    'PLACEHOLDER', 'Алексей', 'Сидоров',   '+7-921-222-22-22',
+            (SELECT id FROM roles WHERE role_name='Rider'), TRUE),
+        ('r_volkova',    'PLACEHOLDER', 'Елена',   'Волкова',   '+7-921-333-33-33',
+            (SELECT id FROM roles WHERE role_name='Rider'), TRUE),
+        ('r_grigoriev',  'PLACEHOLDER', 'Никита',  'Григорьев', '+7-921-444-44-44',
+            (SELECT id FROM roles WHERE role_name='Rider'), TRUE),
+        ('r_lebedeva',   'PLACEHOLDER', 'Татьяна', 'Лебедева',  '+7-921-555-55-55',
+            (SELECT id FROM roles WHERE role_name='Rider'), TRUE),
+        ('r_vasiliev',   'PLACEHOLDER', 'Сергей',  'Васильев',  '+7-921-666-66-66',
+            (SELECT id FROM roles WHERE role_name='Rider'), TRUE),
+        ('r_orlova',     'PLACEHOLDER', 'Юлия',    'Орлова',    '+7-921-777-77-77',
+            (SELECT id FROM roles WHERE role_name='Rider'), TRUE)
+    RETURNING id, username
+)
+INSERT INTO riders (iduser, datebirth, subscription_status,
+                    subscription_balance, rental_balance)
+SELECT id,
+       CASE username
+            WHEN 'r_ivanova'   THEN DATE '1995-03-12'
+            WHEN 'r_sidorov'   THEN DATE '1990-07-23'
+            WHEN 'r_volkova'   THEN DATE '2002-11-04'
+            WHEN 'r_grigoriev' THEN DATE '1998-01-30'
+            WHEN 'r_lebedeva'  THEN DATE '1985-09-15'
+            WHEN 'r_vasiliev'  THEN DATE '1992-05-08'
+            WHEN 'r_orlova'    THEN DATE '2000-12-19'
+       END,
+       CASE WHEN username = 'r_grigoriev' THEN 'paused' ELSE 'active' END,
+       CASE username
+            WHEN 'r_ivanova'   THEN 8
+            WHEN 'r_sidorov'   THEN 5
+            WHEN 'r_volkova'   THEN 6
+            WHEN 'r_grigoriev' THEN 0
+            WHEN 'r_lebedeva'  THEN 3
+            WHEN 'r_vasiliev'  THEN 7
+            WHEN 'r_orlova'    THEN 4
+       END,
+       CASE username
+            WHEN 'r_sidorov'   THEN 2
+            WHEN 'r_grigoriev' THEN 4
+            WHEN 'r_lebedeva'  THEN 1
+            WHEN 'r_orlova'    THEN 2
+            ELSE 0
+       END
+FROM ins_users;
 
 
 -- 4. Тренировки за март–май 2025 (все со статусом 'done')

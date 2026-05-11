@@ -48,15 +48,30 @@ def test_horse_create(app):
 
 
 def test_rider_default_balance_zero(app):
-    from server import db, Rider
+    from server import db, Rider, User, Role
+    from werkzeug.security import generate_password_hash
     with app.app_context():
-        r = Rider(name="Иван", lastname="Иванов", phone="+79991234567")
+        rider_role = Role.query.filter_by(role_name="Rider").first()
+        u = User(
+            username="rider_test_balance",
+            password=generate_password_hash("x", method="pbkdf2:sha256"),
+            name="Иван", lastname="Иванов", phone="+79991234567",
+            idrole=rider_role.id, is_approved=True,
+        )
+        db.session.add(u)
+        db.session.commit()
+        r = Rider(iduser=u.id)
         db.session.add(r)
         db.session.commit()
         assert r.subscription_balance == 0
         assert r.rental_balance == 0
+        # Имя/фамилия/телефон читаются через связанного пользователя
+        assert r.name == "Иван"
+        assert r.lastname == "Иванов"
+        assert r.phone == "+79991234567"
         # cleanup
         db.session.delete(r)
+        db.session.delete(u)
         db.session.commit()
 
 
@@ -74,9 +89,19 @@ def test_service_create(app):
 
 
 def test_workout_create(app):
-    from server import db, Workout, Trainer, Service
+    from server import db, Workout, Trainer, Service, User, Role
+    from werkzeug.security import generate_password_hash
     with app.app_context():
-        t = Trainer(name="Тестовый", lastname="Тренер")
+        trainer_role = Role.query.filter_by(role_name="Trainer").first()
+        u = User(
+            username="trainer_test_workout",
+            password=generate_password_hash("x", method="pbkdf2:sha256"),
+            name="Тестовый", lastname="Тренер",
+            idrole=trainer_role.id, is_approved=True,
+        )
+        db.session.add(u)
+        db.session.commit()
+        t = Trainer(iduser=u.id)
         s = Service(name="Тестовая", duration=60, price=2000, type="individual", limit=1)
         db.session.add(t)
         db.session.add(s)
@@ -87,8 +112,10 @@ def test_workout_create(app):
         db.session.add(w)
         db.session.commit()
         assert w.id is not None
+        assert t.full_name == "Тренер Тестовый"
         # cleanup
         db.session.delete(w)
         db.session.delete(t)
         db.session.delete(s)
+        db.session.delete(u)
         db.session.commit()

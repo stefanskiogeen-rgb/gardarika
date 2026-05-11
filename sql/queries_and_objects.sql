@@ -3,34 +3,37 @@
 -- СУБД: PostgreSQL 15
 
 
--- 1. Запрос на получение расписания тренировок на заданную дату
+-- 1. Запрос на получение расписания тренировок на заданную дату.
+--    Имя и фамилию тренера берём через JOIN на users (t.iduser -> u.id).
 SELECT w.id AS workout_id,
        w.datetime_start AS start_at,
-       COALESCE(t.lastname, '') || ' ' || t.name AS trainer_full_name,
+       COALESCE(ut.lastname, '') || ' ' || COALESCE(ut.name, '') AS trainer_full_name,
        sp.specialization_name AS trainer_specialization,
        s.name AS service_name,
        s.duration AS duration_min,
        w.status
 FROM workouts w
-LEFT JOIN trainers t ON t.id = w.idtrainer
+LEFT JOIN trainers t  ON t.id = w.idtrainer
+LEFT JOIN users    ut ON ut.id = t.iduser
 LEFT JOIN specializations sp ON sp.id = t.idspecialization
 LEFT JOIN services s ON s.id = w.idservice
 WHERE w.datetime_start::date = '2025-06-15'
 ORDER BY w.datetime_start;
 
 
--- 2. Запрос на получение тренировок конкретного всадника
+-- 2. Запрос на получение тренировок конкретного всадника.
 SELECT w.id AS workout_id,
        w.datetime_start AS start_at,
-       COALESCE(t.lastname, '') || ' ' || t.name AS trainer_full_name,
+       COALESCE(ut.lastname, '') || ' ' || COALESCE(ut.name, '') AS trainer_full_name,
        s.name AS service_name,
        h.name AS horse_name,
        w.status
 FROM workout_participants wp
 JOIN workouts w ON w.id = wp.idworkout
-LEFT JOIN trainers t ON t.id = w.idtrainer
+LEFT JOIN trainers t  ON t.id = w.idtrainer
+LEFT JOIN users    ut ON ut.id = t.iduser
 LEFT JOIN services s ON s.id = w.idservice
-LEFT JOIN horses h ON h.id = wp.idhorse
+LEFT JOIN horses   h ON h.id = wp.idhorse
 WHERE wp.idrider = 5
 ORDER BY w.datetime_start DESC;
 
@@ -67,7 +70,8 @@ GROUP BY s.type, s.name
 ORDER BY revenue DESC NULLS LAST;
 
 
--- 5. Представление для формирования полной информации о тренировках
+-- 5. Представление для формирования полной информации о тренировках.
+--    Имя/фамилия тренера — через JOIN на users.
 DROP VIEW IF EXISTS v_workouts_full CASCADE;
 CREATE VIEW v_workouts_full AS
 SELECT w.id AS workout_id,
@@ -75,14 +79,15 @@ SELECT w.id AS workout_id,
        w.status,
        w.notes,
        t.id AS trainer_id,
-       COALESCE(t.lastname, '') || ' ' || t.name AS trainer_full_name,
+       COALESCE(ut.lastname, '') || ' ' || COALESCE(ut.name, '') AS trainer_full_name,
        sp.specialization_name AS trainer_specialization,
        s.id AS service_id,
        s.name AS service_name,
        s.duration AS service_duration,
        s.price AS service_price
 FROM workouts w
-LEFT JOIN trainers t ON t.id = w.idtrainer
+LEFT JOIN trainers t  ON t.id = w.idtrainer
+LEFT JOIN users    ut ON ut.id = t.iduser
 LEFT JOIN specializations sp ON sp.id = t.idspecialization
 LEFT JOIN services s ON s.id = w.idservice;
 
@@ -90,17 +95,19 @@ LEFT JOIN services s ON s.id = w.idservice;
 -- SELECT * FROM v_workouts_full WHERE start_at::date = '2025-06-15';
 
 
--- 6. Представление для формирования таблицы баланса абонементов всадников
+-- 6. Представление для формирования таблицы баланса абонементов всадников.
+--    Имя/фамилия/телефон — из users по FK r.iduser.
 DROP VIEW IF EXISTS v_riders_balance CASCADE;
 CREATE VIEW v_riders_balance AS
 SELECT r.id AS rider_id,
-       COALESCE(r.lastname, '') || ' ' || r.name AS rider_full_name,
-       r.phone,
+       COALESCE(ur.lastname, '') || ' ' || COALESCE(ur.name, '') AS rider_full_name,
+       ur.phone,
        r.subscription_status,
        r.subscription_balance,
        r.rental_balance,
        COALESCE(stat.done_count, 0) AS done_workouts_total
 FROM riders r
+LEFT JOIN users ur ON ur.id = r.iduser
 LEFT JOIN (
     SELECT wp.idrider,
            COUNT(*) FILTER (WHERE w.status = 'done') AS done_count
@@ -243,7 +250,9 @@ $$;
 -- CALL sp_close_workout(17);
 
 
--- 13. Хранимая процедура добавления нового всадника
+-- 13. Хранимая процедура добавления нового всадника.
+--     Имя/фамилия/телефон сохраняются в users, в riders — только профильные поля
+--     (баланс, дата рождения, статус абонемента) и FK iduser.
 CREATE OR REPLACE PROCEDURE sp_add_rider(
     p_name VARCHAR,
     p_lastname VARCHAR,
@@ -256,19 +265,35 @@ CREATE OR REPLACE PROCEDURE sp_add_rider(
 )
 LANGUAGE plpgsql AS $$
 DECLARE
-    new_id INTEGER;
+    v_user_id  INTEGER;
+    new_id     INTEGER;
+    v_username TEXT;
 BEGIN
     IF p_subscription_balance < 0 OR p_rental_balance < 0 THEN
         RAISE EXCEPTION 'Баланс абонемента/проката не может быть отрицательным';
     END IF;
 
-    INSERT INTO riders (name, lastname, datebirth, phone,
-                        subscription_status, subscription_balance, rental_balance, iduser)
-    VALUES (p_name, p_lastname, p_datebirth, p_phone,
-            p_subscription_status, p_subscription_balance, p_rental_balance, p_iduser)
-    RETURNING id INTO new_id;
+    -- Если пользователь не передан — создаём «теневую» учётку.
+    IF p_iduser IS NULL THEN
+        v_username := lower(coalesce(p_name, 'rider')) || '_' || extract(epoch from now())::bigint;
+        INSERT INTO users (username, password, name, lastname, phone, idrole, is_approved)
+        VALUES (v_username, 'PLACEHOLDER', p_name, p_lastname, p_phone,
+                (SELECT id FROM roles WHERE role_name='Rider'), TRUE)
+        RETURNING id INTO v_user_id;
+    ELSE
+        v_user_id := p_iduser;
+        UPDATE users
+        SET name     = COALESCE(p_name,     name),
+            lastname = COALESCE(p_lastname, lastname),
+            phone    = COALESCE(p_phone,    phone)
+        WHERE id = v_user_id;
+    END IF;
 
-    RAISE NOTICE 'Новый всадник добавлен, id=%', new_id;
+    INSERT INTO riders (datebirth, subscription_status,
+                        subscription_balance, rental_balance, iduser)
+    VALUES (p_datebirth, p_subscription_status,
+            p_subscription_balance, p_rental_balance, v_user_id)
+    RETURNING id INTO new_id;
 END;
 $$;
 

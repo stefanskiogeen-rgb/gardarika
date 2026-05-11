@@ -28,10 +28,8 @@ def app():
 
         # Заполняем минимальный набор справочников для тестов
         if not Role.query.filter_by(role_name="Admin").first():
-            db.session.add(Role(role_name="SuperAdmin"))
-            db.session.add(Role(role_name="Admin"))
-            db.session.add(Role(role_name="Trainer"))
-            db.session.add(Role(role_name="Rider"))
+            for n in ("SuperAdmin", "Admin", "Trainer", "Rider", "Guest"):
+                db.session.add(Role(role_name=n))
             db.session.commit()
 
         admin_role = Role.query.filter_by(role_name="Admin").first()
@@ -43,6 +41,10 @@ def app():
                 email="admin@example.com",
                 first_name="Test",
                 last_name="Admin",
+                name="Тест",
+                lastname="Админов",
+                phone="+79991112233",
+                is_approved=True,
                 idrole=admin_role.id,
             ))
             db.session.commit()
