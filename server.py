@@ -1522,6 +1522,7 @@ def _query_revenue(start, end):
 
 @app.route('/reports/revenue')
 @login_required
+@admin_required
 def revenue_report_view():
     sync_workout_statuses()
     start, end = _parse_report_dates()
@@ -1693,6 +1694,7 @@ def _build_revenue_pdf(start, end, rows, total_workouts, total_revenue, avg_chec
 
 @app.route('/reports/revenue.pdf')
 @login_required
+@admin_required
 def revenue_report_pdf():
     sync_workout_statuses()
     start, end = _parse_report_dates()

@@ -87,7 +87,9 @@
             <a href="/horses" class="nav-item">🐎 Лошади</a>
             <a href="/trainers" class="nav-item">🎓 Тренеры</a>
             <a href="/services" class="nav-item">💰 Услуги</a>
+            {% if is_admin %}
             <a href="/reports/revenue" class="nav-item active">📈 Отчёт по выручке</a>
+            {% endif %}
             {% if is_admin %}
             <a href="/admin/approvals" class="nav-item">📝 Заявки</a>
             {% endif %}

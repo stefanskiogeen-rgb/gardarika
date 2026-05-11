@@ -580,7 +580,9 @@
             <a href="/horses" class="nav-item {{'active' if 'horses' in request.path}}">🐎 Лошади</a>
             <a href="/trainers" class="nav-item {{'active' if 'trainers' in request.path}}">🎓 Тренеры</a>
             <a href="/services" class="nav-item {{'active' if 'services' in request.path}}">💰 Услуги</a>
+            {% if is_admin %}
             <a href="/reports/revenue" class="nav-item {{'active' if 'reports/revenue' in request.path}}">📈 Отчёт по выручке</a>
+            {% endif %}
             {% if is_admin %}
             <a href="/admin/approvals" class="nav-item {{'active' if 'admin/approvals' in request.path}}">📝 Заявки</a>
             {% endif %}
@@ -774,6 +776,7 @@
             <p style="margin-bottom:12px; font-size:14px; color:var(--text-muted);">Вы вошли как <b>{{current_user}}</b>
             </p>
 
+            {% if not is_guest %}
             <form action="/profile/change_password" method="POST" style="margin-bottom:32px;">
                 <label
                     style="display:block; font-size:11px; font-weight:800; color:var(--text-muted); text-transform:uppercase; margin-bottom:8px;">Сменить
@@ -782,11 +785,13 @@
                     style="margin-bottom:12px;">
                 <button type="submit" class="btn-primary" style="width:100%;">Обновить пароль</button>
             </form>
+            {% endif %}
 
             <a href="/logout" class="btn-secondary"
                 style="width:100%; color:var(--danger); border-color:var(--danger); display: flex; align-items: center; justify-content: center; gap: 8px;">🚪
                 Выйти из аккаунта</a>
 
+            {% if not is_guest %}
             <form action="/profile/delete_account" method="POST"
                 onsubmit="return confirm('Вы уверены, что хотите БЕЗВОЗВРАТНО удалить свой аккаунт?')"
                 style="margin-top:12px;">
@@ -794,6 +799,7 @@
                     style="width:100%; color:var(--danger); border-color:var(--danger); opacity: 0.6; font-size: 11px; padding: 8px;">Удалить
                     аккаунт</button>
             </form>
+            {% endif %}
 
             <button class="btn-secondary" style="width:100%; margin-top:16px;"
                 onclick="closeProfileModal()">Закрыть</button>
