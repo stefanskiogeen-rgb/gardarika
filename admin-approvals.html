@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gardarika | Заявки на одобрение</title>
+    <link rel="icon" type="image/png" href="{{ url_for('static', filename='img/favicon.png') }}">
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --primary: #1B3022; --primary-light: #2C4A3B; --accent: #C5A059;
+            --bg-main: #FBF9F7; --surface: #FFFFFF; --text-main: #1A1A1A;
+            --text-muted: #7A7A7A; --border: #E8E5DF; --danger: #D72C2C;
+            --success: #1E7D32; --shadow: 0 12px 30px rgba(27,48,34,0.06);
+            --radius-lg: 24px; --radius-md: 12px;
+        }
+        * { margin:0; padding:0; box-sizing:border-box; font-family:'Outfit',sans-serif; }
+        body { background:var(--bg-main); color:var(--text-main); display:flex; height:100vh; overflow:hidden; }
+        a { text-decoration:none; color:inherit; }
+        .sidebar { width:260px; background:var(--surface); border-right:1px solid var(--border); display:flex; flex-direction:column; padding:32px 24px; flex-shrink:0; }
+        .logo { display:flex; align-items:center; gap:12px; }
+        .sidebar .logo { margin-bottom:40px; }
+        .logo img { width:36px; height:36px; border-radius:10px; }
+        .logo span { font-size:16px; font-weight:800; color:var(--primary); text-transform:uppercase; letter-spacing:1px; }
+        .nav-menu { display:flex; flex-direction:column; gap:8px; flex:1; }
+        .nav-item { display:flex; align-items:center; padding:12px 16px; border-radius:var(--radius-md); font-size:14px; font-weight:600; color:var(--text-muted); }
+        .nav-item:hover { background:rgba(27,48,34,0.04); color:var(--primary); }
+        .nav-item.active { background:var(--primary); color:white; box-shadow:0 8px 24px rgba(27,48,34,0.18); }
+        .main-content { flex:1; padding:48px; overflow-y:auto; }
+        .header { display:flex; justify-content:space-between; align-items:center; margin-bottom:36px; }
+        .page-title { font-size:32px; font-weight:800; color:var(--primary); }
+        .table-wrap { background:var(--surface); border-radius:var(--radius-lg); border:1px solid var(--border); overflow-x:auto; }
+        table { width:100%; border-collapse:collapse; min-width: 650px; }
+        th { text-align:left; padding:18px 24px; font-size:11px; font-weight:800; color:var(--text-muted); text-transform:uppercase; background:#FAFAFA; border-bottom:1px solid var(--border); letter-spacing:1px; }
+        td { padding:18px 24px; border-bottom:1px solid var(--border); font-size:14px; }
+        .btn-primary { background:var(--primary); color:white; padding:10px 20px; border-radius:var(--radius-md); border:none; cursor:pointer; font-weight:700; font-size:13px; }
+        .btn-primary:hover { background:var(--primary-light); }
+        .btn-danger { background:var(--danger); color:white; padding:10px 20px; border-radius:var(--radius-md); border:none; cursor:pointer; font-weight:700; font-size:13px; }
+        .badge { padding:6px 14px; border-radius:999px; font-size:10px; font-weight:800; text-transform:uppercase; letter-spacing:0.8px; }
+        .badge-trainer { background:#E7F0FD; color:#2C7BE5; }
+        .badge-other { background:#F3F4F6; color:#7A7A7A; }
+        .empty { padding:60px 32px; text-align:center; color:var(--text-muted); font-size:15px; }
+    </style>
+</head>
+<body>
+    <aside class="sidebar">
+        <div class="logo"><img src="/static/img/logo.png"><span>Gardarika</span></div>
+        <nav class="nav-menu">
+            <a href="/dashboard" class="nav-item">📊 Дашборд</a>
+            <a href="/workouts" class="nav-item">🏇 Тренировки</a>
+            <a href="/riders" class="nav-item">👤 Всадники</a>
+            <a href="/horses" class="nav-item">🐎 Лошади</a>
+            <a href="/trainers" class="nav-item">🎓 Тренеры</a>
+            <a href="/services" class="nav-item">💰 Услуги</a>
+            {% if is_admin %}
+            <a href="/reports/revenue" class="nav-item">📈 Отчёт по выручке</a>
+            {% endif %}
+            <a href="/admin/approvals" class="nav-item active">📝 Заявки на одобрение</a>
+            {% if is_super_admin %}
+            <a href="/admin/users" class="nav-item">⚙️ Админ-панель</a>
+            {% endif %}
+        </nav>
+    </aside>
+
+    <main class="main-content">
+        <div class="header">
+            <h1 class="page-title">Заявки на одобрение</h1>
+            <a href="/dashboard" style="color:var(--text-muted); font-weight:600;">← К дашборду</a>
+        </div>
+
+        <div class="table-wrap">
+            {% if pending %}
+            <table>
+                <thead>
+                    <tr>
+                        <th>Пользователь</th>
+                        <th>Имя / Фамилия</th>
+                        <th>Телефон</th>
+                        <th>Роль</th>
+                        <th style="text-align:right;">Действия</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for u in pending %}
+                    <tr>
+                        <td>
+                            <div style="font-weight:700; color:var(--primary);">{{u.username}}</div>
+                            {% if u.email %}
+                            <div style="font-size:12px; color:var(--text-muted);">{{u.email}}</div>
+                            {% endif %}
+                        </td>
+                        <td>{{u.full_name}}</td>
+                        <td>{{u.phone or '—'}}</td>
+                        <td>
+                            {% if u.is_trainer %}
+                            <span class="badge badge-trainer">Тренер</span>
+                            {% else %}
+                            <span class="badge badge-other">{{u.role.role_name if u.role else '—'}}</span>
+                            {% endif %}
+                        </td>
+                        <td style="text-align:right;">
+                            <div style="display:inline-flex; gap:8px;">
+                                <form action="/admin/approve/{{u.id}}" method="POST" style="display:inline;">
+                                    <button type="submit" class="btn-primary">Одобрить</button>
+                                </form>
+                                <form action="/admin/reject/{{u.id}}" method="POST" style="display:inline;"
+                                      onsubmit="return confirm('Отклонить заявку и удалить пользователя?')">
+                                    <button type="submit" class="btn-danger">Отклонить</button>
+                                </form>
+                            </div>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            {% else %}
+            <div class="empty">
+                <div style="font-size:48px; margin-bottom:12px;">✅</div>
+                <div style="font-size:18px; font-weight:700; color:var(--primary); margin-bottom:4px;">
+                    Все заявки рассмотрены
+                </div>
+                <div>Новых ожидающих одобрения пользователей нет.</div>
+            </div>
+            {% endif %}
+        </div>
+    </main>
+</body>
+</html>

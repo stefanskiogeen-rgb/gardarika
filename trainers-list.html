@@ -119,6 +119,12 @@
             <a href="/horses" class="nav-item {{'active' if 'horses' in request.path}}">🐎 Лошади</a>
             <a href="/trainers" class="nav-item {{'active' if 'trainers' in request.path}}">🎓 Тренеры</a>
             <a href="/services" class="nav-item {{'active' if 'services' in request.path}}">💰 Услуги</a>
+            {% if is_admin %}
+            <a href="/reports/revenue" class="nav-item {{'active' if 'reports/revenue' in request.path}}">📈 Отчёт по выручке</a>
+            {% endif %}
+            {% if is_admin %}
+            <a href="/admin/approvals" class="nav-item {{'active' if 'admin/approvals' in request.path}}">📝 Заявки</a>
+            {% endif %}
             {% if is_super_admin %}
             <a href="/admin/users" class="nav-item {{'active' if 'admin/users' in request.path}}">⚙️ Админ-панель</a>
             {% endif %}
@@ -129,6 +135,9 @@
         <a href="/horses" class="menu-drawer-item">🐎 Лошади</a>
         <a href="/trainers" class="menu-drawer-item">🎓 Тренеры</a>
         <a href="/services" class="menu-drawer-item">💰 Услуги</a>
+        {% if is_admin %}
+        <a href="/admin/approvals" class="menu-drawer-item">📝 Заявки</a>
+        {% endif %}
         {% if is_super_admin %}
         <a href="/admin/users" class="menu-drawer-item">⚙️ Админ-панель</a>
         {% endif %}
@@ -158,17 +167,21 @@
             <h3 style="margin-bottom:24px; font-weight:800; font-size:22px; color:var(--primary);">Мой профиль</h3>
             <p style="margin-bottom:12px; font-size:14px; color:var(--text-muted);">Вы вошли как <b>{{current_user}}</b></p>
             
+            {% if not is_guest %}
             <form action="/profile/change_password" method="POST" style="margin-bottom:32px;">
                 <label style="display:block; font-size:11px; font-weight:800; color:var(--text-muted); text-transform:uppercase; margin-bottom:8px;">Сменить пароль</label>
                 <input type="password" name="new_password" class="form-input" placeholder="Новый пароль" required style="margin-bottom:12px;">
                 <button type="submit" class="btn-primary" style="width:100%;">Обновить пароль</button>
             </form>
+            {% endif %}
 
             <a href="/logout" class="btn-secondary" style="width:100%; color:var(--danger); border-color:var(--danger); display: flex; align-items: center; justify-content: center; gap: 8px;">🚪 Выйти из аккаунта</a>
 
+            {% if not is_guest %}
             <form action="/profile/delete_account" method="POST" onsubmit="return confirm('Вы уверены, что хотите БЕЗВОЗВРАТНО удалить свой аккаунт?')" style="margin-top:12px;">
                 <button type="submit" class="btn-secondary" style="width:100%; color:var(--danger); border-color:var(--danger); opacity: 0.6; font-size: 11px; padding: 8px;">Удалить аккаунт</button>
             </form>
+            {% endif %}
             
             <button class="btn-secondary" style="width:100%; margin-top:16px;" onclick="closeProfileModal()">Закрыть</button>
         </div>
@@ -249,6 +262,15 @@
         {% if is_admin %}<button class="btn-primary" onclick="window.location.href='/trainers/add'">+ Добавить тренера</button>{% endif %}
     </div>
 
+    {% if is_admin and empty_fio_count and empty_fio_count > 0 %}
+    <div style="background:rgba(197,160,89,0.12); border:1px solid rgba(197,160,89,0.35); border-radius:14px; padding:14px 18px; margin-bottom:18px; display:flex; align-items:center; justify-content:space-between; gap:16px; flex-wrap:wrap;">
+        <div style="font-size:14px; color:var(--primary);">
+            <b>{{ empty_fio_count }}</b> тренер(ов) без заполненных ФИО — в списке отображаются логины (<code>trainer1</code>, <code>trainer2</code>, …).
+        </div>
+        <a href="/admin/fill-names" style="background:var(--primary); color:white; padding:10px 18px; border-radius:10px; text-decoration:none; font-weight:700; font-size:13px;">Заполнить ФИО →</a>
+    </div>
+    {% endif %}
+
     <div class="search-container">
         <svg class="search-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
         <input type="text" id="tableSearch" class="search-input" placeholder="Поиск по именам, специализациям или телефонам..." onkeyup="filterTable()">
@@ -259,13 +281,16 @@
             <tbody>
                 {% for t in trainers %}
                 <tr>
-                    <td><div style="display:flex; align-items:center; gap:16px;">{% if t.photo %}<img src="/static/uploads/{{t.photo}}" style="width:48px; height:48px; border-radius:14px; object-fit:cover; border:1px solid var(--border);">{% else %}<div style="width:48px; height:48px; border-radius:14px; background:rgba(27,48,34,0.05); color:var(--primary); display:flex; align-items:center; justify-content:center; font-weight:800; font-size:18px;">{{t.name[0]}}</div>{% endif %}<b>{{t.name|default('—', true)}} {{t.lastname|default('', true)}}</b></div></td>
+                    <td><div style="display:flex; align-items:center; gap:16px;">{% if t.photo %}<img src="/static/uploads/{{t.photo}}" style="width:48px; height:48px; border-radius:14px; object-fit:cover; border:1px solid var(--border);">{% else %}<div style="width:48px; height:48px; border-radius:14px; background:rgba(27,48,34,0.05); color:var(--primary); display:flex; align-items:center; justify-content:center; font-weight:800; font-size:18px;">{{(t.full_name or '?')[0]}}</div>{% endif %}<div><b>{{t.full_name|default('—', true)}}</b>{% if t.user and t.user.is_shadow %}<div style="margin-top:4px;"><span style="display:inline-block; background:rgba(122,122,122,0.12); color:var(--text-muted); border-radius:8px; padding:2px 8px; font-size:10px; font-weight:800; text-transform:uppercase; letter-spacing:0.5px;">Без учётной записи</span></div>{% endif %}</div></div></td>
                     <td>{{t.spec_name|default('—', true)}}</td>
                     <td>{{t.phone|default('—', true)}}</td>
                     {% if is_admin %}
                     <td>
-                        <div style="display:flex; gap:10px;">
-                            <button class="btn-icon" onclick="window.location.href='/trainers/edit/{{t.id}}'">✎</button>
+                        <div style="display:flex; gap:10px; flex-wrap:wrap;">
+                            <button class="btn-icon" onclick="window.location.href='/trainers/edit/{{t.id}}'" title="Редактировать">✎</button>
+                            {% if t.user and t.user.is_shadow %}
+                            <button class="btn-icon" onclick="window.location.href='/admin/invite/{{t.user.id}}'" title="Пригласить в систему" style="color:var(--accent);">✉</button>
+                            {% endif %}
                             <form action="/trainers/delete/{{t.id}}" method="POST" onsubmit="return confirm('Удалить тренера?')"><button type="submit" class="btn-icon" style="color:var(--danger)">🗑</button></form>
                         </div>
                     </td>

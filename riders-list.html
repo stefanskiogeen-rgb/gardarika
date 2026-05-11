@@ -580,6 +580,12 @@
             <a href="/horses" class="nav-item {{'active' if 'horses' in request.path}}">🐎 Лошади</a>
             <a href="/trainers" class="nav-item {{'active' if 'trainers' in request.path}}">🎓 Тренеры</a>
             <a href="/services" class="nav-item {{'active' if 'services' in request.path}}">💰 Услуги</a>
+            {% if is_admin %}
+            <a href="/reports/revenue" class="nav-item {{'active' if 'reports/revenue' in request.path}}">📈 Отчёт по выручке</a>
+            {% endif %}
+            {% if is_admin %}
+            <a href="/admin/approvals" class="nav-item {{'active' if 'admin/approvals' in request.path}}">📝 Заявки</a>
+            {% endif %}
             {% if is_super_admin %}
             <a href="/admin/users" class="nav-item {{'active' if 'admin/users' in request.path}}">⚙️ Админ-панель</a>
             {% endif %}
@@ -589,6 +595,9 @@
         <a href="/horses" class="menu-drawer-item">🐎 Лошади</a>
         <a href="/trainers" class="menu-drawer-item">🎓 Тренеры</a>
         <a href="/services" class="menu-drawer-item">💰 Услуги</a>
+        {% if is_admin %}
+        <a href="/admin/approvals" class="menu-drawer-item">📝 Заявки</a>
+        {% endif %}
         {% if is_super_admin %}
         <a href="/admin/users" class="menu-drawer-item">⚙️ Админ-панель</a>
         {% endif %}
@@ -767,6 +776,7 @@
             <p style="margin-bottom:12px; font-size:14px; color:var(--text-muted);">Вы вошли как <b>{{current_user}}</b>
             </p>
 
+            {% if not is_guest %}
             <form action="/profile/change_password" method="POST" style="margin-bottom:32px;">
                 <label
                     style="display:block; font-size:11px; font-weight:800; color:var(--text-muted); text-transform:uppercase; margin-bottom:8px;">Сменить
@@ -775,11 +785,13 @@
                     style="margin-bottom:12px;">
                 <button type="submit" class="btn-primary" style="width:100%;">Обновить пароль</button>
             </form>
+            {% endif %}
 
             <a href="/logout" class="btn-secondary"
                 style="width:100%; color:var(--danger); border-color:var(--danger); display: flex; align-items: center; justify-content: center; gap: 8px;">🚪
                 Выйти из аккаунта</a>
 
+            {% if not is_guest %}
             <form action="/profile/delete_account" method="POST"
                 onsubmit="return confirm('Вы уверены, что хотите БЕЗВОЗВРАТНО удалить свой аккаунт?')"
                 style="margin-top:12px;">
@@ -787,6 +799,7 @@
                     style="width:100%; color:var(--danger); border-color:var(--danger); opacity: 0.6; font-size: 11px; padding: 8px;">Удалить
                     аккаунт</button>
             </form>
+            {% endif %}
 
             <button class="btn-secondary" style="width:100%; margin-top:16px;"
                 onclick="closeProfileModal()">Закрыть</button>
@@ -797,9 +810,18 @@
 
         <div class="header">
             <h1 class="page-title">Всадники</h1>
-            {% if is_admin %}<button class="btn-primary" onclick="window.location.href='/riders/add'">+ Добавить
+            {% if is_staff %}<button class="btn-primary" onclick="window.location.href='/riders/add'">+ Добавить
                 всадника</button>{% endif %}
         </div>
+
+        {% if is_admin and empty_fio_count and empty_fio_count > 0 %}
+        <div style="background:rgba(197,160,89,0.12); border:1px solid rgba(197,160,89,0.35); border-radius:14px; padding:14px 18px; margin-bottom:18px; display:flex; align-items:center; justify-content:space-between; gap:16px; flex-wrap:wrap;">
+            <div style="font-size:14px; color:var(--primary);">
+                <b>{{ empty_fio_count }}</b> всадник(ов) без заполненных ФИО — в списке отображаются логины (<code>rider1</code>, <code>rider2</code>, …).
+            </div>
+            <a href="/admin/fill-names" style="background:var(--primary); color:white; padding:10px 18px; border-radius:10px; text-decoration:none; font-weight:700; font-size:13px;">Заполнить ФИО →</a>
+        </div>
+        {% endif %}
 
         <div class="search-container">
             <svg class="search-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
@@ -810,13 +832,30 @@
             <input type="text" id="tableSearch" class="search-input"
                 placeholder="Поиск по всадникам, телефонам или статусам..." onkeyup="filterTable()">
         </div>
+
+        {% if linkable_users and (is_admin or is_trainer) %}
+        <div style="background:rgba(197,160,89,0.08); border:1px solid rgba(197,160,89,0.3); border-radius:14px; padding:18px 24px; margin-bottom:24px;">
+            <div style="font-weight:700; color:var(--primary); margin-bottom:10px; font-size:14px;">
+                ⚠️ Пользователи, зарегистрированные как «Всадник», но ещё не добавленные в список:
+            </div>
+            <form action="/riders/link_user" method="POST" style="display:flex; gap:12px; align-items:center; flex-wrap:wrap;">
+                <select name="iduser" required class="form-input" style="flex:1; min-width:240px; padding:10px;">
+                    {% for u in linkable_users %}
+                    <option value="{{u.id}}">{{u.full_name}} ({{u.username}}{% if u.phone %} • {{u.phone}}{% endif %})</option>
+                    {% endfor %}
+                </select>
+                <button type="submit" class="btn-primary" style="padding:10px 20px;">Добавить в список всадников</button>
+            </form>
+        </div>
+        {% endif %}
+
         <div class="table-wrap">
             <table>
                 <thead>
                     <tr>
                         <th>Всадник</th>
                         <th>Телефон</th>
-                        <th>Абонемент</th>{% if is_admin %}<th>Действия</th>{% endif %}
+                        <th>Абонемент</th>{% if is_staff %}<th>Действия</th>{% endif %}
                     </tr>
                 </thead>
                 <tbody>
@@ -828,25 +867,29 @@
                                     style="width:48px; height:48px; border-radius:14px; object-fit:cover; border:1px solid var(--border);">{%
                                 else %}<div
                                     style="width:48px; height:48px; border-radius:14px; background:rgba(27,48,34,0.05); color:var(--primary); display:flex; align-items:center; justify-content:center; font-weight:800; font-size:18px;">
-                                    {{r.name[0]}}</div>{% endif %}<b>{{r.name|default('—', true)}}</b></div>
+                                    {{(r.full_name or '?')[0]}}</div>{% endif %}<div><b>{{r.full_name|default('—', true)}}</b>{% if r.user and r.user.is_shadow %}<div style="margin-top:4px;"><span style="display:inline-block; background:rgba(122,122,122,0.12); color:var(--text-muted); border-radius:8px; padding:2px 8px; font-size:10px; font-weight:800; text-transform:uppercase; letter-spacing:0.5px;">Без учётной записи</span></div>{% endif %}</div></div>
                         </td>
                         <td>{{r.phone|default('—', true)}}</td>
                         <td>
                                 <div style="display:flex; align-items:center; gap:8px;">
-                                    {% if is_admin %}<button class="btn-mini" onclick="adjustBalance('{{r.id}}', -1, '{{ 'rental' if r.subscription_status and 'Аренда' in r.subscription_status else 'sub' }}')">−</button>{% endif %}
+                                    {% if is_staff %}<button class="btn-mini" onclick="adjustBalance('{{r.id}}', -1, '{{ 'rental' if r.subscription_status and 'Аренда' in r.subscription_status else 'sub' }}')">−</button>{% endif %}
                                     
-                                    <button id="sub-badge-{{r.id}}" class="badge {% if r.subscription_status == 'Закончился' %}badge-danger{% elif r.subscription_balance > 0 or r.rental_balance > 0 %}badge-success{% else %}badge-neutral{% endif %}" {% if is_admin %}onclick="showSubModal('{{r.id}}', '{{r.name}}')" {% else %}style="cursor:default" {% endif %}>
-                                        {{r.subscription_status if r.subscription_status else ('Добавить+' if is_admin else 'Нет абонемента')}}
+                                    <button id="sub-badge-{{r.id}}" class="badge {% if r.subscription_status == 'Закончился' %}badge-danger{% elif r.subscription_balance > 0 or r.rental_balance > 0 %}badge-success{% else %}badge-neutral{% endif %}" {% if is_staff %}onclick="showSubModal('{{r.id}}', '{{r.name}}')" {% else %}style="cursor:default" {% endif %}>
+                                        {{r.subscription_status if r.subscription_status else ('Добавить+' if is_staff else 'Нет абонемента')}}
                                     </button>
 
-                                    {% if is_admin %}<button class="btn-mini" onclick="adjustBalance('{{r.id}}', 1, '{{ 'rental' if r.subscription_status and 'Аренда' in r.subscription_status else 'sub' }}')">+</button>{% endif %}
+                                    {% if is_staff %}<button class="btn-mini" onclick="adjustBalance('{{r.id}}', 1, '{{ 'rental' if r.subscription_status and 'Аренда' in r.subscription_status else 'sub' }}')">+</button>{% endif %}
                                 </div>
                         </td>
-                        {% if is_admin %}
+                        {% if is_staff %}
                         <td>
-                            <div style="display:flex; gap:10px;">
+                            <div style="display:flex; gap:10px; flex-wrap:wrap;">
                                 <button class="btn-icon"
-                                    onclick="window.location.href='/riders/edit/{{r.id}}'">✎</button>
+                                    onclick="window.location.href='/riders/edit/{{r.id}}'" title="Редактировать">✎</button>
+                                {% if is_admin and r.user and r.user.is_shadow %}
+                                <button class="btn-icon"
+                                    onclick="window.location.href='/admin/invite/{{r.user.id}}'" title="Пригласить в систему" style="color:var(--accent);">✉</button>
+                                {% endif %}
                                 <form action="/riders/delete/{{r.id}}" method="POST"
                                     onsubmit="return confirm('Вы уверены, что хотите удалить всадника?')"><button
                                         type="submit" class="btn-icon" style="color:var(--danger)">🗑</button></form>

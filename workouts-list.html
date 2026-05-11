@@ -513,6 +513,12 @@
             <a href="/horses" class="nav-item {{'active' if 'horses' in request.path}}">🐎 Лошади</a>
             <a href="/trainers" class="nav-item {{'active' if 'trainers' in request.path}}">🎓 Тренеры</a>
             <a href="/services" class="nav-item {{'active' if 'services' in request.path}}">💰 Услуги</a>
+            {% if is_admin %}
+            <a href="/reports/revenue" class="nav-item {{'active' if 'reports/revenue' in request.path}}">📈 Отчёт по выручке</a>
+            {% endif %}
+            {% if is_admin %}
+            <a href="/admin/approvals" class="nav-item {{'active' if 'admin/approvals' in request.path}}">📝 Заявки</a>
+            {% endif %}
             {% if is_super_admin %}
             <a href="/admin/users" class="nav-item {{'active' if 'admin/users' in request.path}}">⚙️ Админ-панель</a>
             {% endif %}
@@ -522,6 +528,9 @@
         <a href="/horses" class="menu-drawer-item">🐎 Лошади</a>
         <a href="/trainers" class="menu-drawer-item">🎓 Тренеры</a>
         <a href="/services" class="menu-drawer-item">💰 Услуги</a>
+        {% if is_admin %}
+        <a href="/admin/approvals" class="menu-drawer-item">📝 Заявки</a>
+        {% endif %}
         {% if is_super_admin %}
         <a href="/admin/users" class="menu-drawer-item">⚙️ Админ-панель</a>
         {% endif %}
@@ -624,17 +633,21 @@
             <h3 style="margin-bottom:24px; font-weight:800; font-size:22px; color:var(--primary);">Мой профиль</h3>
             <p style="margin-bottom:12px; font-size:14px; color:var(--text-muted);">Вы вошли как <b>{{current_user}}</b></p>
             
+            {% if not is_guest %}
             <form action="/profile/change_password" method="POST" style="margin-bottom:32px;">
                 <label style="display:block; font-size:11px; font-weight:800; color:var(--text-muted); text-transform:uppercase; margin-bottom:8px;">Сменить пароль</label>
                 <input type="password" name="new_password" class="form-input" placeholder="Новый пароль" required style="margin-bottom:12px;">
                 <button type="submit" class="btn-primary" style="width:100%;">Обновить пароль</button>
             </form>
+            {% endif %}
 
             <a href="/logout" class="btn-secondary" style="width:100%; color:var(--danger); border-color:var(--danger); display: flex; align-items: center; justify-content: center; gap: 8px;">🚪 Выйти из аккаунта</a>
 
+            {% if not is_guest %}
             <form action="/profile/delete_account" method="POST" onsubmit="return confirm('Вы уверены, что хотите БЕЗВОЗВРАТНО удалить свой аккаунт?')" style="margin-top:12px;">
                 <button type="submit" class="btn-secondary" style="width:100%; color:var(--danger); border-color:var(--danger); opacity: 0.6; font-size: 11px; padding: 8px;">Удалить аккаунт</button>
             </form>
+            {% endif %}
             
             <button class="btn-secondary" style="width:100%; margin-top:16px;" onclick="closeProfileModal()">Закрыть</button>
         </div>
@@ -658,7 +671,7 @@
                         endif %} onchange="updateFilters()">
                     По всем датам
                 </label>
-                {% if is_admin %}<button class="btn-primary" onclick="window.location.href='/workouts/add'" style="width: var(--btn-width, auto);">+ Составить план</button>{% endif %}
+                {% if is_staff %}<button class="btn-primary" onclick="window.location.href='/workouts/add'" style="width: var(--btn-width, auto);">+ Составить план</button>{% endif %}
             </div>
         </div>
 
@@ -715,7 +728,7 @@
                         <th>Дата / Время</th>
                         <th>Участники (Всадник — Лошадь)</th>
                         <th>Тренер</th>
-                        <th>Статус</th>{% if is_admin %}<th>Действия</th>{% endif %}
+                        <th>Статус</th>{% if is_staff %}<th>Действия</th>{% endif %}
                     </tr>
                 </thead>
                 <tbody>
@@ -733,12 +746,14 @@
                         <td>{{w.trainer|default('—', true)}}</td>
                         <td><button
                                 class="badge {{'badge-success' if w.status == 'Запланировано' else 'badge-info' if w.status == 'Проводится' else 'badge-neutral'}}"
-                                {% if is_admin %}onclick="showStatusModal('{{w.id}}', '{{w.status}}')" {% else
+                                {% if is_staff %}onclick="showStatusModal('{{w.id}}', '{{w.status}}')" {% else
                                 %}style="cursor:default" {% endif %}>{{w.status|default('Запланировано',
                                 true)}}</button></td>
-                        {% if is_admin %}
+                        {% if is_staff %}
                         <td>
                             <div style="display:flex; gap:10px;">
+                                <a href="/workouts/{{w.id}}/receipt" target="_blank" class="btn-icon"
+                                    title="Сформировать PDF-чек оплаты услуг">📄</a>
                                 <button class="btn-icon"
                                     onclick="window.location.href='/workouts/edit/{{w.id}}'">✎</button>
                                 <form action="/workouts/delete/{{w.id}}" method="POST"
