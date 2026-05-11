@@ -574,6 +574,13 @@ def horses_edit(item_id):
 def horses_delete(item_id):
     if not session.get('is_admin'): return "Отказано", 403
     horse = Horse.query.get_or_404(item_id)
+    # Участники тренировок ссылаются на лошадь через FK —
+    # обнуляем ссылку, чтобы не падать по ограничению.
+    db.session.execute(
+        text("UPDATE workout_participants SET idhorse = NULL "
+             "WHERE idhorse = :hid"),
+        {"hid": horse.id}
+    )
     db.session.delete(horse); db.session.commit()
     return redirect(url_for('horses_list'))
 
@@ -697,6 +704,11 @@ def trainers_edit(item_id):
 def trainers_delete(item_id):
     if not session.get('is_admin'): return "Отказано", 403
     trainer = Trainer.query.get_or_404(item_id)
+    # Тренировки ссылаются на тренера через FK — обнуляем ссылку.
+    db.session.execute(
+        text("UPDATE workouts SET idtrainer = NULL WHERE idtrainer = :tid"),
+        {"tid": trainer.id}
+    )
     db.session.delete(trainer); db.session.commit()
     return redirect(url_for('trainers_list'))
 
@@ -820,6 +832,24 @@ def riders_edit(item_id):
         print(f"DEBUG ERROR in riders_edit: {e}")
         return f"Ошибка: {e}", 500
 
+@app.route('/riders/delete/<int:item_id>', methods=['POST'])
+@login_required
+@admin_required
+def riders_delete(item_id):
+    """Удалить всадника. У связанных строк workout_participants
+    обнуляем ссылку на этого всадника — сама строка участника
+    остаётся (могут быть idhorse / guest_name)."""
+    rider = Rider.query.get_or_404(item_id)
+    db.session.execute(
+        text("UPDATE workout_participants SET idrider = NULL "
+             "WHERE idrider = :rid"),
+        {"rid": rider.id}
+    )
+    db.session.delete(rider)
+    db.session.commit()
+    return redirect(url_for('riders_list'))
+
+
 @app.route('/riders/<int:item_id>/subscription', methods=['POST'])
 @login_required
 def rider_add_subscription(item_id):
@@ -921,6 +951,11 @@ def services_edit(item_id):
 def services_delete(item_id):
     if not session.get('is_admin'): return "Отказано", 403
     service = Service.query.get_or_404(item_id)
+    # Тренировки ссылаются на услугу через FK — обнуляем ссылку.
+    db.session.execute(
+        text("UPDATE workouts SET idservice = NULL WHERE idservice = :sid"),
+        {"sid": service.id}
+    )
     db.session.delete(service); db.session.commit()
     return redirect(url_for('services_list'))
 
@@ -1044,6 +1079,11 @@ def workouts_edit(item_id):
 def workouts_delete(item_id):
     if not session.get('is_admin'): return "Отказано", 403
     w = Workout.query.get_or_404(item_id)
+    # Чистим участников тренировки (FK workout_participants.idworkout).
+    db.session.execute(
+        text("DELETE FROM workout_participants WHERE idworkout = :wid"),
+        {"wid": w.id}
+    )
     db.session.delete(w); db.session.commit()
     return redirect(url_for('workouts_list'))
 
