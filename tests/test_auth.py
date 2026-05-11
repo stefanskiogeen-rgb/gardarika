@@ -151,3 +151,67 @@ def test_guest_cannot_add_workout(client):
     r = client.get("/workouts/add", follow_redirects=False)
     # Либо 403 (Отказано), либо редирект — главное, не 200 без проверки
     assert r.status_code in (302, 303, 403)
+
+
+# ===== ТЕНЕВЫЕ УЧЁТКИ И ПРИГЛАШЕНИЕ В СИСТЕМУ =====
+
+def test_shadow_user_cannot_login_until_invited(app, client):
+    """Учётка с is_shadow=True не пускается в систему даже с верным паролем."""
+    from server import User, Role, db
+    from werkzeug.security import generate_password_hash
+    with app.app_context():
+        role = Role.query.filter_by(role_name='Rider').first()
+        u = User(
+            username="shadow1",
+            password=generate_password_hash("p", method="pbkdf2:sha256"),
+            name="Иван", lastname="Тест",
+            idrole=role.id, is_approved=True, is_shadow=True,
+        )
+        db.session.add(u)
+        db.session.commit()
+    r = client.post("/login", data={
+        "username": "shadow1", "password": "p",
+    }, follow_redirects=False)
+    assert r.status_code == 200
+    assert "приглашения" in r.get_data(as_text=True)
+
+
+def test_admin_invite_converts_shadow_user(app, client):
+    """После /admin/invite теневой пользователь получает новый логин/пароль и может войти."""
+    from server import User, Role, db
+    from werkzeug.security import generate_password_hash
+    # Создаём теневую учётку всадника
+    with app.app_context():
+        role = Role.query.filter_by(role_name='Rider').first()
+        u = User(
+            username="shadow2",
+            password=generate_password_hash("garbage", method="pbkdf2:sha256"),
+            name="Пётр", lastname="Тест",
+            idrole=role.id, is_approved=True, is_shadow=True,
+        )
+        db.session.add(u)
+        db.session.commit()
+        uid = u.id
+
+    # Логинимся как админ — follow_redirects, чтобы inject_user проставил session['is_admin']
+    client.post("/login", data={"username": "testadmin", "password": "admin-pass"},
+                follow_redirects=True)
+
+    # Отправляем приглашение
+    r = client.post(f"/admin/invite/{uid}", data={
+        "username": "petr_real", "password": "newpass1",
+    }, follow_redirects=False)
+    assert r.status_code in (302, 303)
+
+    with app.app_context():
+        u2 = User.query.get(uid)
+        assert u2.is_shadow is False
+        assert u2.username == "petr_real"
+
+    # Логаут админа
+    client.get("/logout")
+    # Пользователь теперь может войти
+    r2 = client.post("/login", data={
+        "username": "petr_real", "password": "newpass1",
+    }, follow_redirects=False)
+    assert r2.status_code in (302, 303)

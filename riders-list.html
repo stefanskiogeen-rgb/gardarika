@@ -858,7 +858,7 @@
                                     style="width:48px; height:48px; border-radius:14px; object-fit:cover; border:1px solid var(--border);">{%
                                 else %}<div
                                     style="width:48px; height:48px; border-radius:14px; background:rgba(27,48,34,0.05); color:var(--primary); display:flex; align-items:center; justify-content:center; font-weight:800; font-size:18px;">
-                                    {{(r.full_name or '?')[0]}}</div>{% endif %}<b>{{r.full_name|default('—', true)}}</b></div>
+                                    {{(r.full_name or '?')[0]}}</div>{% endif %}<div><b>{{r.full_name|default('—', true)}}</b>{% if r.user and r.user.is_shadow %}<div style="margin-top:4px;"><span style="display:inline-block; background:rgba(122,122,122,0.12); color:var(--text-muted); border-radius:8px; padding:2px 8px; font-size:10px; font-weight:800; text-transform:uppercase; letter-spacing:0.5px;">Без учётной записи</span></div>{% endif %}</div></div>
                         </td>
                         <td>{{r.phone|default('—', true)}}</td>
                         <td>
@@ -874,9 +874,13 @@
                         </td>
                         {% if is_admin %}
                         <td>
-                            <div style="display:flex; gap:10px;">
+                            <div style="display:flex; gap:10px; flex-wrap:wrap;">
                                 <button class="btn-icon"
-                                    onclick="window.location.href='/riders/edit/{{r.id}}'">✎</button>
+                                    onclick="window.location.href='/riders/edit/{{r.id}}'" title="Редактировать">✎</button>
+                                {% if r.user and r.user.is_shadow %}
+                                <button class="btn-icon"
+                                    onclick="window.location.href='/admin/invite/{{r.user.id}}'" title="Пригласить в систему" style="color:var(--accent);">✉</button>
+                                {% endif %}
                                 <form action="/riders/delete/{{r.id}}" method="POST"
                                     onsubmit="return confirm('Вы уверены, что хотите удалить всадника?')"><button
                                         type="submit" class="btn-icon" style="color:var(--danger)">🗑</button></form>

@@ -52,6 +52,10 @@ class User(db.Model):
     lastname = db.Column(db.String(100))
     phone = db.Column(db.String(50))
     is_approved = db.Column(db.Boolean, default=True, nullable=False)
+    # Маркер «теневой» учётки: создаётся админом, когда у тренера/всадника нет
+    # своего аккаунта в системе. Такой пользователь не может войти, пока админ
+    # его не «пригласит» (см. /admin/invite/<id>).
+    is_shadow = db.Column(db.Boolean, default=False, nullable=False)
     idrole = db.Column(db.Integer, db.ForeignKey('roles.id'))
     role = db.relationship('Role', backref='users')
 
@@ -629,6 +633,7 @@ def trainers_add():
             first_name=name, last_name=lastname,
             idrole=trainer_role.id if trainer_role else None,
             is_approved=True,  # созданного админом сразу публикуем
+            is_shadow=True,    # теневая учётка — без пароля для входа
         )
         db.session.add(u)
         db.session.flush()
@@ -741,6 +746,7 @@ def riders_add():
             first_name=name, last_name=lastname,
             idrole=rider_role.id if rider_role else None,
             is_approved=True,
+            is_shadow=True,   # теневая учётка — без пароля для входа
         )
         db.session.add(u)
         db.session.flush()
@@ -1297,6 +1303,12 @@ def login():
                 'Вход', _login_form_html(),
                 "<div class='alert alert-error'>Ваша учётная запись "
                 "ожидает одобрения администратора.</div>")
+        if u.is_shadow:
+            return _auth_layout(
+                'Вход', _login_form_html(),
+                "<div class='alert alert-error'>Эта учётная запись была "
+                "создана администратором. Дождитесь приглашения в систему."
+                "</div>")
         session.clear()
         session['username'] = u.username
         session['is_guest'] = False
@@ -1436,6 +1448,46 @@ def admin_reject(user_id):
     db.session.delete(u)
     db.session.commit()
     return redirect(url_for('admin_approvals'))
+
+
+# ===== ПРИГЛАШЕНИЕ ТЕНЕВОГО ПОЛЬЗОВАТЕЛЯ В СИСТЕМУ =====
+
+@app.route('/admin/invite/<int:user_id>', methods=['GET', 'POST'])
+@login_required
+@admin_required
+def admin_invite(user_id):
+    """Превращает «теневую» учётку (is_shadow=TRUE) в полноценную:
+    админ задаёт логин и пароль, после чего пользователь может входить сам."""
+    u = User.query.get_or_404(user_id)
+    if not u.is_shadow:
+        # Уже не теневой — нечего приглашать.
+        return redirect(url_for('admin_approvals'))
+
+    if request.method == 'POST':
+        new_username = (request.form.get('username') or '').strip()
+        new_password = request.form.get('password') or ''
+        if not new_username or not new_password:
+            return render_template('admin-invite.html', u=u,
+                                   error='Заполните логин и пароль.')
+        # Уникальность логина
+        clash = User.query.filter(User.username == new_username,
+                                  User.id != u.id).first()
+        if clash:
+            return render_template('admin-invite.html', u=u,
+                                   error='Такой логин уже занят.')
+        u.username = new_username
+        u.password = generate_password_hash(new_password, method='pbkdf2:sha256')
+        u.is_shadow = False
+        u.is_approved = True
+        db.session.commit()
+        # Возвращаемся туда, откуда пришли (по умолчанию — в список соответствующей сущности).
+        if u.is_trainer:
+            return redirect(url_for('trainers_list'))
+        if u.is_rider:
+            return redirect(url_for('riders_list'))
+        return redirect(url_for('admin_approvals'))
+
+    return render_template('admin-invite.html', u=u)
 
 
 # ===== ПРИВЯЗКА ПОЛЬЗОВАТЕЛЯ ВСАДНИКА К СПИСКУ /riders =====
@@ -1721,7 +1773,8 @@ def _migrate_user_profile_fields(is_postgres):
                 "ADD COLUMN IF NOT EXISTS name VARCHAR(100), "
                 "ADD COLUMN IF NOT EXISTS lastname VARCHAR(100), "
                 "ADD COLUMN IF NOT EXISTS phone VARCHAR(50), "
-                "ADD COLUMN IF NOT EXISTS is_approved BOOLEAN DEFAULT TRUE NOT NULL;"
+                "ADD COLUMN IF NOT EXISTS is_approved BOOLEAN DEFAULT TRUE NOT NULL, "
+                "ADD COLUMN IF NOT EXISTS is_shadow BOOLEAN DEFAULT FALSE NOT NULL;"
             ))
             db.session.commit()
         # На SQLite db.create_all() уже создал нужные колонки.
@@ -1753,8 +1806,8 @@ def _migrate_user_profile_fields(is_postgres):
                                                 method='pbkdf2:sha256')
                     db.session.execute(text(
                         "INSERT INTO users(username, password, name, lastname, "
-                        "phone, first_name, last_name, idrole, is_approved) "
-                        "VALUES (:u,:p,:n,:l,:ph,:n,:l,:r,TRUE) RETURNING id"
+                        "phone, first_name, last_name, idrole, is_approved, is_shadow) "
+                        "VALUES (:u,:p,:n,:l,:ph,:n,:l,:r,TRUE,TRUE) RETURNING id"
                     ), {
                         "u": candidate, "p": pw, "n": row.name or '',
                         "l": row.lastname or '', "ph": row.phone or '',
@@ -1808,8 +1861,8 @@ def _migrate_user_profile_fields(is_postgres):
                                                 method='pbkdf2:sha256')
                     db.session.execute(text(
                         "INSERT INTO users(username, password, name, lastname, "
-                        "phone, first_name, last_name, idrole, is_approved) "
-                        "VALUES (:u,:p,:n,:l,:ph,:n,:l,:r,TRUE) RETURNING id"
+                        "phone, first_name, last_name, idrole, is_approved, is_shadow) "
+                        "VALUES (:u,:p,:n,:l,:ph,:n,:l,:r,TRUE,TRUE) RETURNING id"
                     ), {
                         "u": candidate, "p": pw, "n": row.name or '',
                         "l": row.lastname or '', "ph": row.phone or '',
@@ -1837,6 +1890,23 @@ def _migrate_user_profile_fields(is_postgres):
                     "DROP COLUMN IF EXISTS lastname, "
                     "DROP COLUMN IF EXISTS phone;"))
                 db.session.commit()
+
+        # 3. Бекфилл: если name/lastname пустые, а в first_name/last_name
+        #    лежат данные (например, от прошлой миграции) — скопировать обратно.
+        #    Работает и на Postgres, и на SQLite.
+        db.session.execute(text("""
+            UPDATE users
+            SET name = first_name
+            WHERE (name IS NULL OR name = '')
+              AND first_name IS NOT NULL AND first_name <> ''
+        """))
+        db.session.execute(text("""
+            UPDATE users
+            SET lastname = last_name
+            WHERE (lastname IS NULL OR lastname = '')
+              AND last_name IS NOT NULL AND last_name <> ''
+        """))
+        db.session.commit()
         print("Profile field migration completed.")
     except Exception as e:
         print(f"WARN: profile field migration failed (likely already done): {e}")

@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gardarika | Пригласить в систему</title>
+    <link rel="icon" type="image/png" href="{{ url_for('static', filename='img/favicon.png') }}">
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --primary: #1B3022; --primary-light: #2C4A3B; --accent: #C5A059;
+            --bg-main: #FBF9F7; --surface: #FFFFFF; --text-main: #1A1A1A;
+            --text-muted: #7A7A7A; --border: #E8E5DF; --danger: #D72C2C;
+            --shadow: 0 12px 30px rgba(27,48,34,0.06);
+            --radius-lg: 24px; --radius-md: 12px;
+        }
+        * { margin:0; padding:0; box-sizing:border-box; font-family:'Outfit',sans-serif; }
+        body { background:var(--bg-main); color:var(--text-main); min-height:100vh; display:flex; align-items:center; justify-content:center; padding:24px; }
+        .card { background:var(--surface); border-radius:var(--radius-lg); padding:40px; max-width:460px; width:100%; box-shadow:var(--shadow); border:1px solid var(--border); }
+        h1 { font-size:24px; color:var(--primary); margin-bottom:8px; font-weight:800; }
+        .sub { color:var(--text-muted); font-size:14px; margin-bottom:24px; line-height:1.5; }
+        .info { background:rgba(197,160,89,0.08); border-radius:var(--radius-md); padding:16px; margin-bottom:20px; }
+        .info b { color:var(--primary); }
+        .info .label { font-size:11px; text-transform:uppercase; color:var(--text-muted); letter-spacing:0.8px; margin-bottom:4px; font-weight:800; }
+        .form-group { margin-bottom:16px; }
+        .form-label { display:block; font-size:11px; font-weight:800; color:var(--text-muted); text-transform:uppercase; margin-bottom:8px; letter-spacing:0.6px; }
+        .form-input { width:100%; padding:14px 16px; border:1px solid var(--border); border-radius:var(--radius-md); font-size:14px; }
+        .form-input:focus { outline:none; border-color:var(--primary); }
+        .btn-primary { background:var(--primary); color:white; padding:14px 24px; border-radius:var(--radius-md); border:none; cursor:pointer; font-weight:700; font-size:14px; width:100%; }
+        .btn-primary:hover { background:var(--primary-light); }
+        .btn-secondary { background:transparent; color:var(--text-muted); padding:12px 24px; border-radius:var(--radius-md); border:1px solid var(--border); cursor:pointer; font-weight:700; font-size:13px; width:100%; margin-top:12px; text-decoration:none; display:inline-block; text-align:center; }
+        .error { background:rgba(215,44,44,0.08); color:var(--danger); padding:12px 16px; border-radius:var(--radius-md); margin-bottom:16px; font-size:13px; font-weight:600; }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <h1>Пригласить в систему</h1>
+        <p class="sub">Превращает теневую запись в полноценный аккаунт. Пользователь сможет входить сам по новым логину и паролю.</p>
+
+        <div class="info">
+            <div class="label">Кому отправляем приглашение</div>
+            <div><b>{{ u.full_name or '—' }}</b>{% if u.phone %} · {{ u.phone }}{% endif %}</div>
+            <div style="font-size:12px; color:var(--text-muted); margin-top:4px;">
+                Роль: {{ 'Тренер' if u.is_trainer else 'Всадник' if u.is_rider else (u.role.role_name if u.role else '—') }}
+                · Текущий логин: <code>{{ u.username }}</code>
+            </div>
+        </div>
+
+        {% if error %}<div class="error">{{ error }}</div>{% endif %}
+
+        <form action="/admin/invite/{{ u.id }}" method="POST">
+            <div class="form-group">
+                <label class="form-label">Новый логин</label>
+                <input type="text" name="username" class="form-input" required placeholder="например, ivanov" value="{{ request.form.username or '' }}">
+            </div>
+            <div class="form-group">
+                <label class="form-label">Новый пароль</label>
+                <input type="password" name="password" class="form-input" required placeholder="минимум 4 символа">
+            </div>
+            <button type="submit" class="btn-primary">Создать аккаунт и пригласить</button>
+        </form>
+
+        <a href="{{ url_for('trainers_list') if u.is_trainer else url_for('riders_list') }}" class="btn-secondary">Отмена</a>
+    </div>
+</body>
+</html>
